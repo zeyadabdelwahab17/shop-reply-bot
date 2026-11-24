@@ -32,16 +32,24 @@ class ChatRequest(BaseModel):
     history: list[HistoryItem] = Field(default_factory=list, max_length=50)
 
 
+class DebugInfo(BaseModel):
+    model_used: str | None
+    latency_ms: int
+    fallback_used: bool
+
+
 class ChatResponse(BaseModel):
     reply: str
     handoff: bool
     reason: str
+    debug: DebugInfo  # shown on the chat page only when the debug toggle is on
 
 
 @app.post("/chat", response_model=ChatResponse)
 def chat(req: ChatRequest):
-    result, _ = bot.chat(req.message, [h.model_dump() for h in req.history])
-    return result
+    result, meta = bot.chat(req.message, [h.model_dump() for h in req.history])
+    debug = {k: meta[k] for k in ("model_used", "latency_ms", "fallback_used")}
+    return {**result, "debug": debug}
 
 
 @app.get("/health")

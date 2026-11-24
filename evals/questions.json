@@ -25,7 +25,7 @@
   {"id": "q24", "question": "طولي 178 ووزني 80 كيلو ألبس مقاس ايه في الهودي؟", "expected_answer": ["مقاس L"], "category": "tricky_size_advice", "should_handoff": false},
   {"id": "q25", "question": "ممكن تطبعولي اسمي على ضهر التيشيرت؟", "expected_answer": ["تحويل لحد من المحل"], "category": "handoff_custom_print", "should_handoff": true},
   {"id": "q26", "question": "عايز اخد ٥٠ قطعة جملة لمحل عندي، سعر الجملة كام؟", "expected_answer": ["تحويل لحد من المحل"], "category": "handoff_wholesale", "should_handoff": true},
-  {"id": "q27", "question": "عندكم كوتشيات؟", "expected_answer": ["تحويل لحد من المحل"], "category": "handoff_not_sold", "should_handoff": true},
+  {"id": "q27", "question": "عندكم كوتشيات؟", "expected_answer": ["مش بنبيع كوتشيات / مش متوفر عندنا", "يقترح 1-2 منتجات من الكتالوج (مثلًا بنطلون كارجو أو سويت)"], "category": "not_in_catalog", "should_handoff": false},
   {"id": "q28", "question": "انا طالب من اسبوع والاوردر لسه موصلش!! ده ايه الاحترام ده", "expected_answer": ["تحويل لحد من المحل"], "category": "handoff_complaint", "should_handoff": true},
   {"id": "q29", "question": "مفيش خصم لو اخدت هودي وبنطلون مع بعض؟", "expected_answer": ["تحويل لحد من المحل"], "category": "handoff_discount", "should_handoff": true},
   {"id": "q30", "question": "الجاكت الجينز هينزل تاني امتى؟", "expected_answer": ["تحويل لحد من المحل"], "category": "handoff_restock_date", "should_handoff": true}

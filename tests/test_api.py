@@ -70,8 +70,14 @@ def test_chat_returns_all_fields(monkeypatch, isolated):
     fake_gemini(monkeypatch, {"main-model": [OK]})
     r = client.post("/chat", json={"message": "الهودي بكام؟", "history": []})
     assert r.status_code == 200
-    assert r.json() == {"reply": "الهودي بـ 1250 جنيه", "handoff": False, "reason": "price of P05"}
+    body = r.json()
+    assert {k: body[k] for k in ("reply", "handoff", "reason")} == {
+        "reply": "الهودي بـ 1250 جنيه", "handoff": False, "reason": "price of P05"}
+    assert body["debug"]["model_used"] == "main-model"
+    assert body["debug"]["fallback_used"] is False
+    assert isinstance(body["debug"]["latency_ms"], int)
     rec = last_log(isolated)
+    assert rec["reason"] == "price of P05"
     assert rec["model_used"] == "main-model"
     assert rec["fallback_used"] is False
     assert rec["error_type"] is None
@@ -116,6 +122,8 @@ def test_both_models_failing_returns_handoff(monkeypatch, isolated):
     assert rec["model_used"] is None
     assert rec["fallback_used"] is True
     assert rec["handoff"] is True
+    assert rec["reason"] == "all models failed"
+    assert body["debug"]["model_used"] is None
 
 
 def test_handoff_reply_always_contains_handoff_message(monkeypatch):
@@ -132,7 +140,7 @@ def test_log_has_no_message_text(monkeypatch, isolated):
     assert "أحمد" not in text and "01000000000" not in text
     assert set(last_log(isolated)) == {
         "timestamp", "prompt_version", "model_tried_first", "model_used", "fallback_used",
-        "error_type", "retries", "latency_ms", "handoff",
+        "error_type", "retries", "latency_ms", "handoff", "reason",
     }
 
 
@@ -155,6 +163,13 @@ def test_error_types():
 
 def test_empty_message_rejected():
     assert client.post("/chat", json={"message": "   "}).status_code == 422
+
+
+def test_bot_uses_prompt_v2_and_keeps_v1():
+    assert bot.PROMPT_VERSION == "system_v2"
+    assert (bot.ROOT / "app" / "prompts" / "system_v1.txt").exists()
+    assert "PRODUCTS THE SHOP DOES NOT SELL" in bot.SYSTEM_PROMPT
+    assert "{{SHOP_INFO}}" not in bot.SYSTEM_PROMPT
 
 
 def test_history_is_limited_to_last_6():

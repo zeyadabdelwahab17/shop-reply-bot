@@ -52,16 +52,24 @@ Small and focused: one problem, solved well, easy to see. No extra features.
 - `.env`: `GEMINI_MODEL=gemini-3.5-flash` (works), `GEMINI_FALLBACK_MODEL=gemini-2.5-flash`.
 
 ## State after Day 2
-- `app/bot.py`: loads shop file once, prompt from `app/prompts/system_v1.txt` (`PROMPT_VERSION`),
+- `app/bot.py`: loads shop file once, prompt from `app/prompts/system_v2.txt` (`PROMPT_VERSION`; v1 kept),
   JSON output `{reply, handoff, reason}`, temperature 0.2, last 6 history messages.
   Retry: 503/429 on the main model → wait 2s, retry once → fallback model → handoff message. Never raises.
   Hard 20s limit per call (worker thread), because the SDK timeout alone let calls run 120s+.
   If handoff=true the reply always contains the exact handoff message.
-  `log_request()` appends technical fields only (no message text) to `logs/requests.jsonl` (gitignored);
-  Day 4 should send the same record to Langfuse from there.
-- `app/main.py`: POST /chat, GET /health, GET / (`app/static/index.html`, WhatsApp-style RTL page).
-- `scripts/try_bot.py` (real API, 7 questions), `scripts/fallback_report.py` (log summary).
-- `tests/test_api.py`: 13 tests, Gemini mocked. 16 tests total, all passing.
+  `log_request()` appends technical fields + the model's `reason` (no message text) to
+  `logs/requests.jsonl` (gitignored); Day 4 should send the same record to Langfuse from there.
+- Prompt v2 vs v1: products not in the catalog → say "we don't sell it" + suggest 1–2 catalog items,
+  no handoff. Handoff only for wholesale, complaints/order problems, discounts, custom requests,
+  info truly missing from the file, or unsure. `reason` must not contain personal details.
+- `evals/questions.json`: q27 (sneakers) is now category `not_in_catalog`, should_handoff false → 5 handoff questions.
+- `app/main.py`: POST /chat (returns reply, handoff, reason + `debug` {model_used, latency_ms, fallback_used}),
+  GET /health, GET / (`app/static/index.html`, WhatsApp-style RTL page; "debug" toggle in the header,
+  off by default, shows model / latency / handoff / reason under each reply).
+- `scripts/try_bot.py` (real API, 8 questions incl. q27), `scripts/fallback_report.py` (log summary).
+- `tests/test_api.py`: 14 tests, Gemini mocked. 17 tests total, all passing.
+- Free tier quota: about 20 generate requests per day per model (`gemini-3.5-flash` counts against
+  the `gemini-3.6-flash` quota). Hit on 24 Nov 2026. Matters for Day 3 (30 eval questions).
 - KNOWN ISSUE: `gemini-2.5-flash` returns 404 "no longer available to new users" for this key, so the
   fallback never works. User must pick another fallback model (decision pending).
 - Main model latency is 4–15s per reply and sometimes over 20s (→ handoff). Not tuned yet.

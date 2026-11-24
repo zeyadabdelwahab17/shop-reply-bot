@@ -78,6 +78,22 @@
   .bot .bubble { background: var(--bubble-bot); border-top-right-radius: 0; }
   .user .bubble { background: var(--bubble-user); border-top-left-radius: 0; }
   .note { font-size: 12px; color: var(--muted); margin-top: 3px; padding: 0 4px; }
+  .debug {
+    display: none;
+    direction: ltr; text-align: left;
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 11px; color: var(--muted);
+    margin-top: 3px; padding: 0 4px;
+    overflow-wrap: anywhere;
+  }
+  body.show-debug .debug { display: block; }
+  .debug-toggle {
+    margin-inline-start: auto;
+    display: flex; align-items: center; gap: 6px;
+    font-size: 12px; opacity: .85; cursor: pointer;
+    user-select: none;
+  }
+  .debug-toggle input { accent-color: #25d366; cursor: pointer; }
   .typing .bubble { color: var(--muted); font-style: italic; }
   .error .bubble { background: #fde8e8; }
   .day {
@@ -151,6 +167,9 @@
       <div class="title">ميدان ١٣</div>
       <div class="subtitle">خدمة العملاء · بيرد عليك بوت</div>
     </div>
+    <label class="debug-toggle" title="Show model, latency and reason under each reply">
+      <input type="checkbox" id="debugToggle"> debug
+    </label>
   </header>
 
   <main id="messages" aria-live="polite">
@@ -204,6 +223,30 @@
     return row;
   }
 
+  function addDebug(row, data) {
+    const d = data.debug || {};
+    const line = document.createElement("div");
+    line.className = "debug";
+    line.textContent =
+      "model: " + (d.model_used || "none") + (d.fallback_used ? " (fallback)" : "") +
+      " · " + (d.latency_ms ?? "?") + " ms" +
+      " · handoff: " + data.handoff +
+      " · reason: " + (data.reason || "-");
+    row.appendChild(line);
+  }
+
+  // Debug toggle: off by default, remembered in this browser only.
+  const debugToggle = document.getElementById("debugToggle");
+  function applyDebug(on) {
+    document.body.classList.toggle("show-debug", on);
+    debugToggle.checked = on;
+  }
+  try { applyDebug(localStorage.getItem("debug") === "1"); } catch (e) { applyDebug(false); }
+  debugToggle.addEventListener("change", () => {
+    applyDebug(debugToggle.checked);
+    try { localStorage.setItem("debug", debugToggle.checked ? "1" : "0"); } catch (e) {}
+  });
+
   function setBusy(value) {
     busy = value;
     sendBtn.disabled = value;
@@ -228,7 +271,8 @@
       if (!res.ok) throw new Error("HTTP " + res.status);
       const data = await res.json();
       typing.remove();
-      addBubble("bot", data.reply, "", data.handoff ? "تم تحويل المحادثة لموظف" : "");
+      const row = addBubble("bot", data.reply, "", data.handoff ? "تم تحويل المحادثة لموظف" : "");
+      addDebug(row, data);
       history.push({ role: "bot", text: data.reply });
     } catch (err) {
       typing.remove();

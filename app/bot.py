@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(ROOT / ".env")
 
 SHOP_FILE = ROOT / "data" / "shop_info.json"
-PROMPT_VERSION = "system_v1"
+PROMPT_VERSION = "system_v2"
 PROMPT_FILE = ROOT / "app" / "prompts" / f"{PROMPT_VERSION}.txt"
 LOG_FILE = ROOT / "logs" / "requests.jsonl"
 
@@ -172,6 +172,7 @@ def answer(message, history=None):
 
     meta["latency_ms"] = round((time.monotonic() - start) * 1000)
     meta["handoff"] = result["handoff"]
+    meta["reason"] = result["reason"]
     log.info("answered by %s (fallback=%s, latency=%sms)", meta["model_used"], meta["fallback_used"], meta["latency_ms"])
     return result, meta
 
@@ -180,7 +181,8 @@ _log_lock = threading.Lock()
 
 
 def log_request(meta):
-    """Append one line to logs/requests.jsonl. Only technical fields: no key, no message text.
+    """Append one line to logs/requests.jsonl. No key and no message text; "reason" is the model's short
+    English note (the prompt forbids personal details in it).
 
     Kept in one place so Day 4 can send the same record to Langfuse.
     """
@@ -194,6 +196,7 @@ def log_request(meta):
         "retries": meta["retries"],
         "latency_ms": meta["latency_ms"],
         "handoff": meta["handoff"],
+        "reason": meta["reason"],
     }
     with _log_lock:
         LOG_FILE.parent.mkdir(parents=True, exist_ok=True)

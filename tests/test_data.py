@@ -38,5 +38,8 @@ def test_question_ids_unique_and_mix_correct():
     questions = load(QUESTIONS_FILE)
     ids = [q["id"] for q in questions]
     assert len(ids) == len(set(ids)), "duplicate question ids"
-    assert sum(q["should_handoff"] for q in questions) == 6
+    assert sum(q["should_handoff"] for q in questions) == 5
+    # Products the shop doesn't sell are answered (not available + suggestion), not handed off.
+    not_sold = [q for q in questions if q["category"] == "not_in_catalog"]
+    assert not_sold and not any(q["should_handoff"] for q in not_sold)
     assert sum(q["category"].startswith("tricky_") for q in questions) == 4
