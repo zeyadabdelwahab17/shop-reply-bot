@@ -1,6 +1,6 @@
 # Egyptian-Arabic Shop Reply Bot — project guide
 
-Portfolio project for an AI Engineer job search (Egypt / Gulf / remote). Built in 5 days, 2–3 hours per day.
+Portfolio project for an AI Engineer job search (Egypt / Gulf / remote). Built in 6 days, 2–3 hours per day.
 Do ONE day per request, then stop and wait for the user. Never start the next day on your own.
 
 ## What the bot does
@@ -8,7 +8,7 @@ A bot for small online clothing shops in Egypt. It answers customer questions (p
 shipping, returns, payment) in Egyptian Arabic.
 1. It answers ONLY from `data/shop_info.json`. It never invents prices, sizes or policies.
 2. If the answer is not in the file, or it is not sure, it replies with the handoff message
-   (`handoff_message` in the shop file: "هحوّلك لحد من المحل يرد عليك حالًا 🙏") and flags the conversation.
+   (`handoff_message` in the shop file: "هحوّلك لحد من المحل وهيرد عليك في أقرب وقت خلال مواعيد العمل") and flags the conversation.
 3. A public page shows its measured accuracy.
 Small and focused: one problem, solved well, easy to see. No extra features.
 
@@ -24,9 +24,19 @@ Small and focused: one problem, solved well, easy to see. No extra features.
 ## Plan
 - Day 1: data + repo setup — **DONE (24 Nov 2026)**
 - Day 2: the bot + chat page — **DONE (24 Nov 2026)**
-- Day 3: eval script + CI accuracy gate
-- Day 4: deploy + monitoring + stats page
-- Day 5: README, demo video script, LinkedIn post
+- Day 3: evals + MLflow to compare prompt versions / models + CI (GitHub Actions).
+  Mocked pytest runs on every push; the real 30-question eval runs only on manual trigger
+  (`workflow_dispatch`), because of the free-tier quota.
+- Day 4: deploy to Cloud Run + Langfuse monitoring + stats page + demo limits.
+- Day 5: handoff tickets:
+  - ask for the customer's phone, validated in code (11 digits, starts with 010/011/012/015)
+  - scripted no-LLM fallback reply when all models are down
+  - private Google Sheet with columns: ticket_id, timestamp, channel, username, phone, category, priority,
+    summary, conversation, status, first_contact_time
+  - instant Telegram alert for high/medium priority tickets
+  - daily report via scheduled GitHub Actions
+  - phone numbers live only in the sheet: never in logs or Langfuse
+- Day 6: README, demo video script, LinkedIn post
 
 ## Rules
 - Fictional data only. The shop "Midan 13" (ميدان ١٣) is invented. No real customer data, no real phone numbers.

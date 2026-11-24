@@ -23,6 +23,11 @@ def test_shop_info_loads():
         assert PRODUCT_FIELDS <= p.keys(), f"product {p.get('name')} is missing fields"
 
 
+def test_handoff_message_is_honest():
+    # No promise of an instant reply: a person answers during working hours.
+    assert load(SHOP_FILE)["handoff_message"] == "هحوّلك لحد من المحل وهيرد عليك في أقرب وقت خلال مواعيد العمل"
+
+
 def test_questions_load_and_have_all_fields():
     questions = load(QUESTIONS_FILE)
     assert len(questions) == 30
