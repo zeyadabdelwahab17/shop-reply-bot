@@ -276,6 +276,18 @@ def test_bot_uses_prompt_v2_and_keeps_v1():
     assert "{{SHOP_INFO}}" not in bot.SYSTEM_PROMPT
 
 
+def test_prompt_shop_data_is_minified_but_keeps_facts():
+    data = bot.shop_for_prompt(bot.SHOP)
+    assert "_note" not in data and "payment_methods" not in data
+    assert all("id" not in p and "colors" not in p for p in data["products"])
+    assert all("zone" not in z and "zone_ar" in z for z in data["shipping"]["zones"])
+    p = data["products"][0]
+    assert {"name", "name_ar", "price_egp", "sizes", "colors_ar", "in_stock"} <= p.keys()
+    assert data["handoff_message"] == bot.HANDOFF_MESSAGE
+    assert "_note" in bot.SHOP and "id" in bot.SHOP["products"][0]  # the file itself is untouched
+    assert bot.SYSTEM_PROMPT.startswith("You are the customer service assistant")  # static part first
+
+
 def test_history_is_limited_to_last_6():
     history = [{"role": "user" if i % 2 == 0 else "bot", "text": f"msg {i}"} for i in range(10)]
     messages = bot.build_messages("new", history)

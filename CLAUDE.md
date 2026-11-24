@@ -15,7 +15,7 @@ Small and focused: one problem, solved well, easy to see. No extra features.
 ## Fixed tech stack (do not swap anything without asking)
 - Python + FastAPI
 - LLM: FREE tiers only, called through the OpenAI-compatible chat-completions API (`openai` SDK + base_url).
-  Chain in `.env` `LLM_CHAIN` (provider:model, in order): Groq primary (pending user approval), then
+  Chain in `.env` `LLM_CHAIN` (provider:model, in order): Groq `qwen/qwen3.8-27b` (approved), then
   `gemini-3.5-flash`, then `gemini-3.1-flash-lite`. Keys: `GROQ_API_KEY`, `GEMINI_API_KEY`.
 - No vector DB: the whole shop file goes into the prompt as context
 - Tests: pytest. CI: GitHub Actions
@@ -93,5 +93,9 @@ Small and focused: one problem, solved well, easy to see. No extra features.
   - Groq `allam-2-7b`: unusable (4k context, JSON mode fails, loops without it).
   - Gemini: ~20 requests/day per model; `gemini-3.5-flash` counts against the `gemini-3.6-flash` quota.
     `gemini-3.1-flash-lite` works (2 s). `gemini-2.5-flash` → 404 for new users (removed).
-- PENDING: user must approve the Groq primary model (recommended `qwen/qwen3.8-27b`) before it goes into
-  `LLM_CHAIN`. Until then the chain is gemini-3.5-flash → gemini-3.1-flash-lite.
+- Primary approved: `LLM_CHAIN=groq:qwen/qwen3.8-27b,gemini:gemini-3.5-flash,gemini:gemini-3.1-flash-lite`.
+- Shop data in the prompt is minified by `shop_for_prompt()` (no note, ids, English colors/zones/payment
+  methods): 2653 → 2411 prompt tokens per request with qwen. Groq reported no cached tokens for qwen.
+- Input for prompt v3 (Day 3) is listed in `docs/BUILD_LOG.md` (q21 unclear yes/no, q27 suggested an
+  out-of-stock item, size advice check, shorter rules text). Prompt v2 is unchanged.
+- Tests: 29 passing.

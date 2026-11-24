@@ -12,6 +12,7 @@ Failure handling per model:
 - all models fail                      -> the shop's handoff message (never raises)
 """
 
+import copy
 import json
 import logging
 import os
@@ -72,11 +73,32 @@ def parse_chain(text):
 
 CHAIN = parse_chain(os.getenv("LLM_CHAIN", DEFAULT_CHAIN))
 
-# Loaded once at startup. Compact JSON keeps the prompt small (Groq free tier counts tokens per minute).
+def shop_for_prompt(shop):
+    """The shop data as the model sees it: without fields it never needs (saves tokens).
+
+    Dropped: the project note, product ids, and English duplicates of colors, shipping zones and
+    payment methods (the Arabic versions stay). English product names stay for Franco/English questions.
+    """
+    data = copy.deepcopy(shop)
+    data.pop("_note", None)
+    data.pop("payment_methods", None)
+    for key in ("type", "physical_store", "currency"):
+        data["shop"].pop(key, None)
+    for product in data["products"]:
+        product.pop("id", None)
+        product.pop("colors", None)
+    for zone in data["shipping"]["zones"]:
+        zone.pop("zone", None)
+    return data
+
+
+# Loaded once at startup. The system prompt (rules + shop data) is the SAME string on every request and
+# comes first, so providers can cache it; history and the customer message come after it.
+# Compact JSON keeps it small (Groq's free tier counts tokens per minute).
 SHOP = json.loads(SHOP_FILE.read_text(encoding="utf-8"))
 HANDOFF_MESSAGE = SHOP["handoff_message"]
 SYSTEM_PROMPT = PROMPT_FILE.read_text(encoding="utf-8").replace(
-    "{{SHOP_INFO}}", json.dumps(SHOP, ensure_ascii=False, separators=(",", ":"))
+    "{{SHOP_INFO}}", json.dumps(shop_for_prompt(SHOP), ensure_ascii=False, separators=(",", ":"))
 )
 
 

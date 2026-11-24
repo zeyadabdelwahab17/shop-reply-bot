@@ -122,3 +122,31 @@ On a free LLM tier, the hard part wasn't the prompt: it was 503s, 404s on a list
 
 ### LinkedIn angle
 On free LLM tiers the bottleneck was tokens per minute, not requests per day: with the whole shop catalog in the prompt, a free Groq model handles only 2–3 messages a minute, so the bot falls through a chain of three free models instead of failing.
+
+---
+
+## Day 2 (continued) — primary model and token budget (24 Nov 2026)
+
+### What changed
+- **Primary model approved:** `LLM_CHAIN=groq:qwen/qwen3.8-27b,gemini:gemini-3.5-flash,gemini:gemini-3.1-flash-lite`.
+- **Minified shop data in the prompt** (`shop_for_prompt()` in `app/bot.py`): the project note, product ids, and the English duplicates of colors, shipping zones and payment methods are dropped; Arabic versions and English product names stay. `data/shop_info.json` itself is unchanged.
+- **Prompt layout checked for caching:** the system message (rules + shop data) is identical on every request and comes first; history and the customer message come after it.
+
+### Numbers (3 real calls to `qwen/qwen3.8-27b`)
+| | Prompt tokens | Total tokens | Messages/min at 8000 tokens/min |
+|---|---|---|---|
+| Before (full shop JSON, compact) | 2653 | 2721 | ~2.9 |
+| After (minified) | 2411 | 2478 | ~3.2 |
+
+- −242 prompt tokens per request (−9%). System prompt 8749 → 7921 characters. Same reply to the same question.
+- **No cached tokens reported.** `prompt_tokens_details` was empty on all 3 calls, including a repeat with the identical prefix. Prompt caching does not appear to be active for this model on the free tier, so the layout helps only if Groq enables it later (or with a model that supports it).
+- The rules text of prompt v2 (English) is now the larger part of the prompt; shortening it is a prompt v3 topic.
+
+### Input for prompt v3 (Day 3)
+- **q21 unclear wording:** qwen answered "وإيه في مقاس XL" instead of a clear "أيوه، XL متاح". Ask for an explicit yes/no on availability questions.
+- **q27 suggested an out-of-stock item:** for sneakers it suggested the denim jacket (out of stock, though it said so). Make "suggest only items with in_stock: true" stricter.
+- Also from the comparison: gpt-oss-120b recommended XL for 178 cm / 80 kg (guide says L). Size advice should check height and weight against the table explicitly.
+- Try a shorter rules text to cut tokens per request.
+
+### LinkedIn angle
+I cut the prompt by 9% by removing data the model never uses; on a tokens-per-minute free tier that is directly more customers per minute.
