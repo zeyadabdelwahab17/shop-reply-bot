@@ -29,7 +29,8 @@ def main():
              for qid in QUESTION_IDS]
     cases.append(("injection", INJECTION, ["polite refusal, no discount"], False))
 
-    print(f"prompt: {bot.PROMPT_VERSION} | main: {bot.MAIN_MODEL} | fallback: {bot.FALLBACK_MODEL}\n")
+    chain = " -> ".join(f"{p}:{m}" for p, m in bot.CHAIN)
+    print(f"prompt: {bot.PROMPT_VERSION} | chain: {chain}\n")
     for i, (qid, question, expected, should_handoff) in enumerate(cases):
         if i:
             time.sleep(WAIT_SECONDS)
@@ -37,7 +38,7 @@ def main():
         print(f"[{qid}] {question}")
         print(f"  reply:      {result['reply']}")
         print(f"  handoff:    {result['handoff']} (expected {should_handoff})")
-        print(f"  model_used: {meta['model_used']} | fallback: {meta['fallback_used']} | {meta['latency_ms']} ms")
+        print(f"  model_used: {meta['provider']}:{meta['model_used']} | fallback: {meta['fallback_used']} | {meta['latency_ms']} ms")
         print(f"  expected:   {' / '.join(expected)}")
         print(f"  reason:     {result['reason']}\n")
 

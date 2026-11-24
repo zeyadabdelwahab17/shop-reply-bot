@@ -228,7 +228,7 @@
     const line = document.createElement("div");
     line.className = "debug";
     line.textContent =
-      "model: " + (d.model_used || "none") + (d.fallback_used ? " (fallback)" : "") +
+      "model: " + (d.model_used ? (d.provider + ":" + d.model_used) : "none") + (d.fallback_used ? " (fallback)" : "") +
       " · " + (d.latency_ms ?? "?") + " ms" +
       " · handoff: " + data.handoff +
       " · reason: " + (data.reason || "-");

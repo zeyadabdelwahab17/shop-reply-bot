@@ -1,6 +1,7 @@
-"""Summarize logs/requests.jsonl: main-model errors, fallback use, complete failures, latency.
+"""Summarize logs/requests.jsonl: errors, fallback use, breaker events, demo-limit hits, latency.
 
 Run: .\\.venv\\Scripts\\python.exe scripts\\fallback_report.py [path\\to\\requests.jsonl]
+Works with older log lines too (missing fields count as empty).
 """
 
 import json
@@ -21,18 +22,33 @@ def load_records(path):
     return records
 
 
+def model_name(r):
+    if r.get("model_used") is None:
+        return None
+    return f"{r['provider']}:{r['model_used']}" if r.get("provider") else r["model_used"]
+
+
 def summarize(records):
-    total = len(records)
-    errors = Counter(r["error_type"] for r in records if r.get("error_type"))
-    fallback = sum(1 for r in records if r.get("fallback_used"))
-    failed = sum(1 for r in records if r.get("model_used") is None)
+    limit_hits = Counter(r["limit_hit"] for r in records if r.get("limit_hit"))
+    llm = [r for r in records if not r.get("limit_hit")]  # requests that reached the model chain
+    total = len(llm)
+    errors = Counter(r["error_type"] for r in llm if r.get("error_type"))
+    fallback = sum(1 for r in llm if r.get("fallback_used"))
+    failed = sum(1 for r in llm if r.get("model_used") is None)
     recovered_by_retry = sum(
-        1 for r in records
+        1 for r in llm
         if r.get("retries") and not r.get("fallback_used") and r.get("model_used") is not None
     )
+    answered_by = Counter(model_name(r) for r in llm if model_name(r))
+    events = [e for r in llm for e in r.get("breaker_events", [])]
+    skipped = Counter(a["result"] for r in llm for a in r.get("attempts", []) if a["result"].startswith("skipped"))
+    attempt_errors = Counter(
+        (a["model"], a["result"]) for r in llm for a in r.get("attempts", [])
+        if a["result"] != "ok" and not a["result"].startswith("skipped")
+    )
     latencies = defaultdict(list)
-    for r in records:
-        latencies[r.get("model_used") or "none (all failed)"].append(r["latency_ms"])
+    for r in llm:
+        latencies[model_name(r) or "none (all failed)"].append(r["latency_ms"])
     return {
         "total": total,
         "main_errors": dict(errors),
@@ -41,18 +57,35 @@ def summarize(records):
         "fallback_used": fallback,
         "fallback_pct": round(100 * fallback / total, 1) if total else 0.0,
         "failed_completely": failed,
+        "answered_by": dict(answered_by),
+        "errors_by_model": {f"{m} {k}": n for (m, k), n in attempt_errors.items()},
+        "breaker_opens": sum(1 for e in events if e.startswith("breaker_open")),
+        "quota_skips": sum(1 for e in events if e.startswith("quota_skip_today")),
+        "skipped_attempts": dict(skipped),
+        "limit_hits": dict(limit_hits),
         "avg_latency_ms": {m: round(sum(v) / len(v)) for m, v in latencies.items()},
     }
 
 
 def print_report(s):
-    print(f"Total requests:                 {s['total']}")
-    print(f"Main model errors:              {s['main_errors_total']}")
+    print(f"Requests to the model chain:    {s['total']}")
+    print(f"First error per request:        {s['main_errors_total']}")
     for kind, n in sorted(s["main_errors"].items()):
         print(f"  - {kind}: {n}")
     print(f"Recovered by retry (same model): {s['recovered_by_retry']}")
     print(f"Fallback model used:            {s['fallback_used']} ({s['fallback_pct']}%)")
     print(f"Failed completely (handoff):    {s['failed_completely']}")
+    print("Answered by:")
+    for model, n in sorted(s["answered_by"].items()):
+        print(f"  - {model}: {n}")
+    if s["errors_by_model"]:
+        print("Failed attempts by model:")
+        for k, n in sorted(s["errors_by_model"].items()):
+            print(f"  - {k}: {n}")
+    print(f"Circuit breaker opened:         {s['breaker_opens']}")
+    print(f"Daily quota used up (events):   {s['quota_skips']}")
+    print(f"Attempts skipped:               {sum(s['skipped_attempts'].values())} {s['skipped_attempts'] or ''}")
+    print(f"Demo limit hits:                {sum(s['limit_hits'].values())} {s['limit_hits'] or ''}")
     print("Average latency per model:")
     for model, ms in sorted(s["avg_latency_ms"].items()):
         print(f"  - {model}: {ms} ms")

@@ -71,3 +71,54 @@ Before writing any AI code, I wrote 30 real-style customer questions with expect
 
 ### LinkedIn angle
 On a free LLM tier, the hard part wasn't the prompt: it was 503s, 404s on a listed model, timeouts that don't time out, and a 20-requests-per-day limit. Every failure ends in a polite handoff, never a crash.
+
+---
+
+## Day 2 (continued) — free providers and a model fallback chain (24 Nov 2026)
+
+### What was built
+- **Provider-agnostic bot.** All models are called through the OpenAI-compatible chat-completions API (`openai` SDK with a custom `base_url`). Groq and Gemini use the same code; `google-genai` was removed.
+- **Model chain from `.env`** (`LLM_CHAIN=provider:model,...`). Planned order: Groq model (pending approval) → `gemini-3.5-flash` → `gemini-3.1-flash-lite`.
+- **Per-model failure handling:**
+  - daily-quota 429: no retry, the model is skipped for the rest of the day;
+  - 503 / timeout: one retry after 1 s;
+  - per-minute 429 and other errors: straight to the next model;
+  - 3 failures in a row: circuit breaker skips the model for 60 s;
+  - hard 12 s limit per call (was 20 s).
+- **Minimal reasoning** per model: gpt-oss `low`, Qwen3 `none`, Gemini `minimal`.
+- **Demo protection:** 15 messages per visitor (IP) per day and 150 per day in total (both from `.env`). Over the limit, a fixed reply is sent without any LLM call: "الديمو وصل للحد بتاعه النهارده، جرّب بكرة 🙏". The IP is only an in-memory counter key and is never logged.
+- **Richer request log:** provider, every attempt (model, result, ms), breaker and quota events, demo-limit hits. `fallback_report.py` reports all of them.
+- `scripts/compare_models.py`: runs eval questions against several models and prints replies, JSON validity, latency and the rate-limit headers.
+
+### Decisions and why
+- **OpenAI-compatible format instead of each vendor's SDK.** One code path, and switching or adding a free provider is a one-line `.env` change.
+- **Different rules per error type.** Retrying a daily-quota error wastes 1–2 s for nothing (the reset is hours away); retrying a 503 often works. A per-minute 429 goes to the next model instead of waiting, because a chat customer should not wait a minute.
+- **Circuit breaker.** When a model is down, every message would otherwise pay its timeout first; after 3 failures it is skipped for a minute.
+- **Compact shop JSON in the prompt.** 10.3k → 8.7k characters, because Groq's free tier limits tokens per minute.
+- **Primary model not switched yet.** The comparison below is on 5 questions only; the owner approves the model, and Day 3's 30-question eval checks it.
+
+### Model comparison (prompt v2, q01 q12 q21 q24 q27, Groq free tier)
+| Model | Correct | Valid JSON | Avg latency | Egyptian Arabic | Free limit (headers) |
+|---|---|---|---|---|---|
+| `qwen/qwen3.8-27b` | 3/5 | 5/5 | 944 ms | natural (one garbled word) | 1000 req/day, 8000 tokens/min |
+| `openai/gpt-oss-120b` | 3/5 | 5/5 | 956 ms | natural, a bit stiff | 1000 req/day, 8000 tokens/min |
+| `allam-2-7b` | 0/5 | 0/5 | — (fails in ~1.3 s) | wrong (loops) | not returned |
+
+- gpt-oss-120b errors: recommended XL for 178 cm / 80 kg (the size guide says L); suggested a "سويت شورت بـ 500" (mixed up sweatpants 800 and shorts 500).
+- qwen3.8-27b errors: "وإيه في مقاس XL" instead of a clear "XL متاح"; suggested the out-of-stock denim jacket (it did say it's out of stock) plus the hoodie.
+- Allam: 4,096-token context; the prompt alone is ~3k tokens. JSON mode returns 400 "Failed to generate JSON"; without JSON mode it repeats fragments of the shop file in a loop.
+- `gemini-3.1-flash-lite` (one test call, not part of the table): correct answer in valid JSON in 2.0 s.
+
+### Problems and fixes
+- **Groq tokens-per-minute is the real limit, not requests per day.** A request with the full shop file is ~2.7–3k prompt tokens, so 8000 tokens/min ≈ 2–3 messages per minute per model. Above that the chain falls through to Gemini (per-minute 429 → next model, no wait).
+- **Allam (Arabic model) can't be used** with a long system prompt and JSON output.
+- **`gemini-2.5-flash` fallback (404 for new users)** replaced by `gemini-3.1-flash-lite`, which has its own quota.
+- **Gemini returns no rate-limit headers**, so its daily limit (about 20 requests per model) is only known from 429 errors.
+
+### Numbers
+- Groq replies: ~0.7–1.3 s vs 4–20 s for `gemini-3.5-flash`.
+- 2 of the 3 Groq models: 5/5 valid JSON, 3/5 correct on 5 questions (small sample; Day 3 runs all 30).
+- Tests: 28 passing (4 data, 24 API), all model calls mocked.
+
+### LinkedIn angle
+On free LLM tiers the bottleneck was tokens per minute, not requests per day: with the whole shop catalog in the prompt, a free Groq model handles only 2–3 messages a minute, so the bot falls through a chain of three free models instead of failing.
