@@ -1,0 +1,174 @@
+{
+  "_note": "Fictional shop for a portfolio project. Not a real brand. No real contact details.",
+  "shop": {
+    "name": "Midan 13",
+    "name_ar": "ميدان ١٣",
+    "type": "Cairo streetwear brand, online only (Instagram + website)",
+    "physical_store": false,
+    "physical_store_note": "مفيش فرع أو محل نقدر تيجي فيه، البيع أونلاين بس والتوصيل لحد البيت.",
+    "currency": "EGP"
+  },
+  "products": [
+    {
+      "id": "P01",
+      "name": "Basic Oversized Tee",
+      "name_ar": "تيشيرت أوفرسايز بيسك",
+      "price_egp": 450,
+      "sizes": ["S", "M", "L", "XL", "XXL"],
+      "colors": ["black", "white", "olive"],
+      "colors_ar": ["أسود", "أبيض", "زيتي"],
+      "in_stock": true
+    },
+    {
+      "id": "P02",
+      "name": "Cairo Skyline Graphic Tee",
+      "name_ar": "تيشيرت جرافيك القاهرة",
+      "price_egp": 550,
+      "sizes": ["S", "M", "L", "XL"],
+      "colors": ["black", "off-white"],
+      "colors_ar": ["أسود", "أوف وايت"],
+      "in_stock": true
+    },
+    {
+      "id": "P03",
+      "name": "Nile Wave Graphic Tee",
+      "name_ar": "تيشيرت جرافيك النيل",
+      "price_egp": 550,
+      "sizes": ["M", "L", "XL", "XXL"],
+      "colors": ["navy"],
+      "colors_ar": ["كحلي"],
+      "in_stock": false
+    },
+    {
+      "id": "P04",
+      "name": "Long Sleeve Tee",
+      "name_ar": "تيشيرت كم طويل",
+      "price_egp": 600,
+      "sizes": ["S", "M", "L", "XL"],
+      "colors": ["black", "white"],
+      "colors_ar": ["أسود", "أبيض"],
+      "in_stock": true
+    },
+    {
+      "id": "P05",
+      "name": "Heavyweight Hoodie",
+      "name_ar": "هودي تقيل",
+      "price_egp": 1250,
+      "sizes": ["S", "M", "L", "XL", "XXL"],
+      "colors": ["black", "grey", "maroon"],
+      "colors_ar": ["أسود", "رمادي", "نبيتي"],
+      "in_stock": true
+    },
+    {
+      "id": "P06",
+      "name": "Zip-Up Hoodie",
+      "name_ar": "هودي بسوستة",
+      "price_egp": 1400,
+      "sizes": ["M", "L", "XL"],
+      "colors": ["black"],
+      "colors_ar": ["أسود"],
+      "in_stock": true
+    },
+    {
+      "id": "P07",
+      "name": "Cargo Pants",
+      "name_ar": "بنطلون كارجو",
+      "price_egp": 950,
+      "sizes": ["S", "M", "L", "XL"],
+      "colors": ["black", "khaki"],
+      "colors_ar": ["أسود", "كاكي"],
+      "in_stock": true
+    },
+    {
+      "id": "P08",
+      "name": "Sweatpants",
+      "name_ar": "بنطلون سويت",
+      "price_egp": 800,
+      "sizes": ["S", "M", "L", "XL", "XXL"],
+      "colors": ["grey", "black"],
+      "colors_ar": ["رمادي", "أسود"],
+      "in_stock": true
+    },
+    {
+      "id": "P09",
+      "name": "Denim Jacket",
+      "name_ar": "جاكت جينز",
+      "price_egp": 1800,
+      "sizes": ["M", "L"],
+      "colors": ["light blue"],
+      "colors_ar": ["لبني"],
+      "in_stock": false
+    },
+    {
+      "id": "P10",
+      "name": "Shorts",
+      "name_ar": "شورت",
+      "price_egp": 500,
+      "sizes": ["S", "M", "L", "XL"],
+      "colors": ["black", "beige"],
+      "colors_ar": ["أسود", "بيج"],
+      "in_stock": true
+    },
+    {
+      "id": "P11",
+      "name": "Dad Cap",
+      "name_ar": "كاب",
+      "price_egp": 350,
+      "sizes": ["One size"],
+      "colors": ["black", "beige"],
+      "colors_ar": ["أسود", "بيج"],
+      "in_stock": true
+    },
+    {
+      "id": "P12",
+      "name": "Tote Bag",
+      "name_ar": "شنطة توت",
+      "price_egp": 250,
+      "sizes": ["One size"],
+      "colors": ["off-white"],
+      "colors_ar": ["أوف وايت"],
+      "in_stock": true
+    }
+  ],
+  "size_guide": {
+    "fit": "Oversized fit. Chest = width from armpit to armpit (flat). Length = from shoulder to bottom hem.",
+    "tops_cm": {
+      "S":   {"chest": 54, "length": 70, "height_cm": "160-168", "weight_kg": "55-65"},
+      "M":   {"chest": 56, "length": 72, "height_cm": "168-175", "weight_kg": "65-75"},
+      "L":   {"chest": 58, "length": 74, "height_cm": "175-182", "weight_kg": "75-85"},
+      "XL":  {"chest": 60, "length": 76, "height_cm": "180-188", "weight_kg": "85-95"},
+      "XXL": {"chest": 62, "length": 78, "height_cm": "185-195", "weight_kg": "95-110"}
+    },
+    "bottoms_waist_cm": {"S": 76, "M": 81, "L": 86, "XL": 91, "XXL": 97},
+    "advice": "لو ما بين مقاسين وعايز الفورم أوفرسايز أكتر اختار المقاس الأكبر."
+  },
+  "shipping": {
+    "zones": [
+      {"zone": "Cairo & Giza", "zone_ar": "القاهرة والجيزة", "price_egp": 60, "delivery_days": "1-2"},
+      {"zone": "Alexandria, Delta & Canal cities", "zone_ar": "إسكندرية والدلتا ومدن القناة", "price_egp": 75, "delivery_days": "2-4"},
+      {"zone": "Upper Egypt, Red Sea, Matrouh & Sinai", "zone_ar": "الصعيد والبحر الأحمر ومطروح وسيناء", "price_egp": 90, "delivery_days": "3-6"}
+    ],
+    "free_shipping_over_egp": 2000,
+    "cash_on_delivery": true,
+    "cash_on_delivery_note": "الدفع عند الاستلام متاح في كل المحافظات من غير مصاريف زيادة.",
+    "open_package_before_paying": true,
+    "open_package_note": "تقدر تفتح الشحنة وتشوف القطع قبل ما تدفع، بس مش مسموح القياس قدام المندوب.",
+    "delivery_days_note": "أيام التوصيل أيام عمل، من غير الجمعة."
+  },
+  "returns": {
+    "exchange_days": 14,
+    "exchange_policy": "استبدال المقاس أو اللون خلال 14 يوم من الاستلام، بشرط القطعة متلبستش ولسه بالتيكت.",
+    "refund_days": 7,
+    "refund_policy": "استرجاع الفلوس خلال 7 أيام من الاستلام، بشرط القطعة متلبستش ولسه بالتيكت. الفلوس بترجع على إنستاباي أو فودافون كاش خلال 3-5 أيام عمل بعد ما القطعة توصلنا.",
+    "return_shipping": "العميل بيدفع مصاريف شحن الاستبدال أو الاسترجاع، إلا لو القطعة فيها عيب صناعة أو وصلت غلط، ساعتها المحل بيتحمل الشحن.",
+    "not_returnable": "الكاب وشنطة التوت ما ينفعش يترجعوا أو يتبدلوا لأسباب صحية."
+  },
+  "payment_methods": ["cash on delivery", "InstaPay", "Vodafone Cash"],
+  "payment_methods_ar": ["كاش عند الاستلام", "إنستاباي", "فودافون كاش"],
+  "payment_note": "مش بنقبل فيزا أو كريدت كارد حاليًا.",
+  "working_hours": {
+    "customer_service": "السبت للخميس من 12 الضهر لـ 10 بالليل، والجمعة من 4 العصر لـ 10 بالليل.",
+    "orders": "تقدر تطلب أونلاين 24 ساعة، والأوردرات بتتشحن في أيام العمل."
+  },
+  "handoff_message": "هحوّلك لحد من المحل يرد عليك حالًا 🙏"
+}
