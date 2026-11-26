@@ -28,7 +28,7 @@ services:
       - key: APP_ENV
         value: production
       - key: LLM_CHAIN
-        value: groq:qwen/qwen3.8-27b,gemini:gemini-3.5-flash,gemini:gemini-3.1-flash-lite
+        value: groq:qwen/qwen3.8-27b,gemini:gemini-3.1-flash-lite
       - key: PROMPT_VERSION
         value: system_v2
       - key: DEMO_MAX_PER_VISITOR

@@ -387,6 +387,25 @@ Questions that changed: v2 q04 (wrong → correct), v3 q19 (wrong → correct), 
   `srb:demo:<UTC date>:total` should equal the number of chats today. The "day" is the UTC date, so the demo
   counters reset at 02:00 Cairo time.
 
+### Fixes after the live checks (26 Nov 2026, approved by the user)
+- **`gemini-3.5-flash` removed from the chain.** Its latency with the full prompt (21.5 s) exceeds the 12 s call
+  limit, so it could never answer in time: it only made the customer wait ~25 s before the handoff.
+  New chain: `LLM_CHAIN=groq:qwen/qwen3.8-27b,gemini:gemini-3.1-flash-lite` (1.5–2.4 s on the same question).
+  Trade-off: one fallback model instead of two, and flash-lite's own free quota (~20 requests/day) is now the
+  only backup when Groq hits its per-minute or daily limit.
+- **No timeout retry that starves the next model.** A timeout is retried only if, after the 1 s wait and a full
+  12 s retry, at least 3 s would still be left for the next usable model. The last model may still retry (no
+  one else needs the time); 503s keep their retry (they fail fast). With the new chain: Groq times out at 12 s →
+  flash-lite gets the remaining ~13 s instead of nothing. 3 new tests (scaled-down clock).
+- Models not tried because the budget ran out are now logged as `skipped_budget` (before, they vanished from
+  the trace).
+- **Region check:** the dashboard's "Function Region = iad1" is only the project default. `vercel.json` sets
+  `regions: ["fra1"]`, and every live response carries `x-vercel-id: fra1::fra1::…` (Vercel: the header lists
+  "regions your request hit, as well as the region the function was executed in"). Timing agrees: the wholesale
+  question took 565 ms end to end with 395 ms in Groq, so the 3 Upstash calls + the Langfuse send + the network
+  to Cairo fit in ~170 ms. From iad1, each of those 4 calls to Frankfurt would add a ~90 ms round trip (≥ 360 ms).
+  No change needed.
+
 ### Day 4 summary
 - Held-out set (15 user-written questions): **93.3%**. Main set: **96.8%** in all 3 runs. CI full threshold 91.8%,
   smoke 90%.

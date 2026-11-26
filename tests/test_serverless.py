@@ -205,3 +205,55 @@ def test_read_only_disk_does_not_break_chat(monkeypatch, redis, tmp_path):
     monkeypatch.setattr(bot, "LOG_FILE", blocker / "requests.jsonl")   # mkdir/open will fail
     monkeypatch.setattr(bot, "call_model", lambda *a, **k: OK)
     assert chat()["reply"] == OK.reply
+
+
+# ---------- no timeout retry that starves the next model ----------
+
+def _timeout_then_ok(calls, slow_seconds):
+    """Fake call_model: "primary" sleeps then times out; every other model answers at once."""
+    from app.bot import BotReply
+
+    def fake(provider, model, messages, timeout=None):
+        calls.append(model)
+        if model == "primary":
+            time.sleep(slow_seconds)
+            raise TimeoutError("slow")
+        return BotReply(reply="تمام", handoff=False, reason="ok")
+    return fake
+
+
+def _small_clock(monkeypatch):
+    # The real numbers scaled down 10x: budget 25 s, call timeout 12 s, retry wait 1 s, min call 3 s.
+    monkeypatch.setattr(bot, "REQUEST_BUDGET_SECONDS", 2.5)
+    monkeypatch.setattr(bot, "CALL_TIMEOUT_SECONDS", 1.2)
+    monkeypatch.setattr(bot, "RETRY_WAIT_SECONDS", 0.1)
+    monkeypatch.setattr(bot, "MIN_CALL_SECONDS", 0.3)
+
+
+def test_slow_timeout_is_not_retried_when_next_model_would_starve(monkeypatch, redis):
+    _small_clock(monkeypatch)
+    monkeypatch.setattr(bot, "CHAIN", [("groq", "primary"), ("gemini", "second")])
+    calls = []
+    monkeypatch.setattr(bot, "call_model", _timeout_then_ok(calls, 1.2))
+    result, meta = bot.answer("عندكو جزم؟")
+    assert calls == ["primary", "second"]          # no second 12 s wait on the slow model
+    assert meta["model_used"] == "second" and meta["retries"] == 0
+    assert not result["handoff"]
+
+
+def test_last_model_may_still_retry_a_timeout(monkeypatch, redis):
+    _small_clock(monkeypatch)
+    monkeypatch.setattr(bot, "CHAIN", [("groq", "primary")])
+    calls = []
+    monkeypatch.setattr(bot, "call_model", _timeout_then_ok(calls, 0.2))
+    bot.answer("عندكو جزم؟")
+    assert calls == ["primary", "primary"]         # nobody after it needs the time
+
+
+def test_fast_timeout_keeps_its_retry_when_budget_allows(monkeypatch, redis):
+    _small_clock(monkeypatch)
+    monkeypatch.setattr(bot, "CHAIN", [("groq", "primary"), ("gemini", "second")])
+    calls = []
+    monkeypatch.setattr(bot, "call_model", _timeout_then_ok(calls, 0.0))
+    bot.answer("عندكو جزم؟")
+    assert calls[:2] == ["primary", "primary"]     # plenty of time left -> one retry, then the next model

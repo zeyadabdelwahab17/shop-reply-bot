@@ -16,7 +16,8 @@ Small and focused: one problem, solved well, easy to see. No extra features.
 - Python + FastAPI
 - LLM: FREE tiers only, called through the OpenAI-compatible chat-completions API (`openai` SDK + base_url).
   Chain in `.env` `LLM_CHAIN` (provider:model, in order): Groq `qwen/qwen3.8-27b` (approved), then
-  `gemini-3.5-flash`, then `gemini-3.1-flash-lite`. Keys: `GROQ_API_KEY`, `GEMINI_API_KEY`.
+  `gemini-3.1-flash-lite`. `gemini-3.5-flash` was removed on 26 Nov 2026 (21.5 s with the full prompt, over the
+  12 s call limit). Keys: `GROQ_API_KEY`, `GEMINI_API_KEY`.
 - No vector DB: the whole shop file goes into the prompt as context
 - Tests: pytest. CI: GitHub Actions
 - Monitoring: Langfuse Cloud free Hobby plan
@@ -94,7 +95,7 @@ Small and focused: one problem, solved well, easy to see. No extra features.
   - Groq `allam-2-7b`: unusable (4k context, JSON mode fails, loops without it).
   - Gemini: ~20 requests/day per model; `gemini-3.5-flash` counts against the `gemini-3.6-flash` quota.
     `gemini-3.1-flash-lite` works (2 s). `gemini-2.5-flash` → 404 for new users (removed).
-- Primary approved: `LLM_CHAIN=groq:qwen/qwen3.8-27b,gemini:gemini-3.5-flash,gemini:gemini-3.1-flash-lite`.
+- Primary approved: `LLM_CHAIN=groq:qwen/qwen3.8-27b,gemini:gemini-3.5-flash,gemini:gemini-3.1-flash-lite` (replaced on 26 Nov 2026 by `groq:qwen/qwen3.8-27b,gemini:gemini-3.1-flash-lite`).
 - Shop data in the prompt is minified by `shop_for_prompt()` (no note, ids, English colors/zones/payment
   methods): 2653 → 2411 prompt tokens per request with qwen. Groq reported no cached tokens for qwen.
 - Input for prompt v3 (Day 3) is listed in `docs/BUILD_LOG.md` (q21 unclear yes/no, q27 suggested an
@@ -138,7 +139,10 @@ Small and focused: one problem, solved well, easy to see. No extra features.
   `/api/public/v2/observations` for `/stats` (60 s cache). `APP_ENV=production` on Vercel. Empty keys → off.
   TLS uses the OS trust store (Avast HTTPS scanning on the dev PC).
 - `/stats` + `/stats.json`: latest 3 main runs (mean/min), latest holdout, live counters from Langfuse.
-- Open: `gemini-3.5-flash` took 21.5 s with the full prompt on 26 Nov (over the 12 s limit) → when Groq hits
-  its per-minute limit, the request can burn the 25 s budget before reaching `flash-lite`. Chain reorder pending
-  the user's decision. Langfuse cuts metadata strings at ~200 chars.
-- Tests: 88 passing.
+- Chain (approved 26 Nov): `LLM_CHAIN=groq:qwen/qwen3.8-27b,gemini:gemini-3.1-flash-lite`; `gemini-3.5-flash` removed (21.5 s, over the 12 s limit).
+  A timeout is not retried when the retry could leave < `MIN_CALL_SECONDS` for the next usable model
+  (`_retry_starves_next`); the last model may still retry; 503 retries unchanged. Models not tried because the
+  budget ran out are logged as `skipped_budget`. Langfuse cuts metadata strings at ~200 chars.
+- Region: functions run in `fra1` (from `vercel.json`; `x-vercel-id: fra1::fra1::…`), even though the project
+  dashboard shows the default `iad1`. Upstash database is in Frankfurt.
+- Tests: 91 passing.

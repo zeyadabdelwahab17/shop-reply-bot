@@ -2,7 +2,7 @@
 
 Providers (all free tiers) are called through the OpenAI chat-completions format with a custom base_url,
 so Groq and Gemini use the same code. The chain is read from LLM_CHAIN in .env, e.g.
-    LLM_CHAIN=groq:openai/gpt-oss-120b,gemini:gemini-3.5-flash,gemini:gemini-3.1-flash-lite
+    LLM_CHAIN=groq:qwen/qwen3.8-27b,gemini:gemini-3.1-flash-lite
 
 Failure handling per model:
 - daily quota used up (429 "per day")  -> no retry, skip this model for the rest of the day
@@ -49,7 +49,7 @@ PROVIDERS = {
     "groq": {"base_url": "https://api.groq.com/openai/v1", "key_env": "GROQ_API_KEY"},
     "gemini": {"base_url": "https://generativelanguage.googleapis.com/v1beta/openai/", "key_env": "GEMINI_API_KEY"},
 }
-DEFAULT_CHAIN = "gemini:gemini-3.5-flash,gemini:gemini-3.1-flash-lite"
+DEFAULT_CHAIN = "groq:qwen/qwen3.8-27b,gemini:gemini-3.1-flash-lite"
 
 TEMPERATURE = 0.2
 MAX_OUTPUT_TOKENS = 1024
@@ -384,7 +384,7 @@ def answer(message, history=None):
     load_shared_health([f"{p}:{m}" for p, m in CHAIN])
     deadline = start + REQUEST_BUDGET_SECONDS
     reply = None
-    for provider, model in CHAIN:
+    for index, (provider, model) in enumerate(CHAIN):
         key = f"{provider}:{model}"
         skip = skip_reason(key)
         if skip:
@@ -409,13 +409,18 @@ def answer(message, history=None):
                 meta["attempts"].append({"model": key, "result": kind, "ms": _ms(t0)})
                 meta["breaker_events"] += record_failure(key, kind)
                 meta["error_type"] = meta["error_type"] or kind
-                if kind in RETRYABLE_ERRORS and tried == 0 and not skip_reason(key):
+                if (kind in RETRYABLE_ERRORS and tried == 0 and not skip_reason(key)
+                        and not _retry_starves_next(kind, index, deadline)):
                     tried = 1
                     meta["retries"] += 1
                     time.sleep(RETRY_WAIT_SECONDS)
                     continue
                 break
-        if reply is not None or deadline - time.monotonic() < MIN_CALL_SECONDS:
+        if reply is not None:
+            break
+        if deadline - time.monotonic() < MIN_CALL_SECONDS:
+            meta["attempts"] += [{"model": f"{p}:{m}", "result": "skipped_budget", "ms": 0}
+                                 for p, m in CHAIN[index + 1:]]
             break
 
     if reply is None:
@@ -429,6 +434,21 @@ def answer(message, history=None):
     log.info("answered by %s:%s (fallback=%s, latency=%sms)",
              meta["provider"], meta["model_used"], meta["fallback_used"], meta["latency_ms"])
     return result, meta
+
+
+def _retry_starves_next(kind, index, deadline):
+    """True if retrying a TIMEOUT now could leave less than MIN_CALL_SECONDS for the next usable model.
+
+    A timeout retry can take a full CALL_TIMEOUT_SECONDS again (seen live: gemini-3.5-flash timed out twice and
+    used the whole budget before the next model was tried). The last usable model may still retry: no one
+    else needs the time. Other retryable errors (503) fail fast, so they keep their retry.
+    """
+    if kind != "timeout":
+        return False
+    if not any(not skip_reason(f"{p}:{m}") for p, m in CHAIN[index + 1:]):
+        return False
+    left_after_retry = deadline - time.monotonic() - RETRY_WAIT_SECONDS - CALL_TIMEOUT_SECONDS
+    return left_after_retry < MIN_CALL_SECONDS
 
 
 def finalize(reply):
