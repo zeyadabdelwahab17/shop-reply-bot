@@ -34,6 +34,22 @@ def test_groq_json_failure_counts_as_invalid_json_not_invalid_call():
     assert out[0]["status"] == "wrong" and out[0]["invalid_json"]
 
 
+def test_smoke_set_is_10_key_questions_from_the_main_set():
+    smoke = run_eval.load_questions("smoke")
+    assert [q["id"] for q in smoke] == run_eval.SMOKE_IDS and len(smoke) == 10
+    categories = {q["category"] for q in smoke}
+    assert {"price", "stock", "tricky_size_advice", "injection", "not_in_catalog"} <= categories
+    assert sum(q["should_handoff"] for q in smoke) == 2
+
+
+def test_quota_wait_seconds():
+    err = ("quota_daily: Error code: 429 - Rate limit reached ... on tokens per day (TPD): Limit 200000, "
+           "Used 198714, Requested 2540. Please try again in 9m1.728s. Need more tokens?")
+    assert round(run_eval.quota_wait_seconds(err), 1) == 541.7
+    assert run_eval.quota_wait_seconds("try again in 3h0m0s") is None      # too long: stop instead
+    assert run_eval.quota_wait_seconds("no time given") is None
+
+
 def test_parse_seconds():
     assert run_eval.parse_seconds("7.66s") == 7.66
     assert run_eval.parse_seconds("1m2s") == 62

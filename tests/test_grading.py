@@ -1,7 +1,9 @@
 import json
 from pathlib import Path
 
-from evals.grading import contains, grade, normalize
+import pytest
+
+from evals.grading import contains, grade, normalize, says
 
 QUESTIONS = {q["id"]: q for q in json.loads(
     (Path(__file__).resolve().parent.parent / "evals" / "questions.json").read_text(encoding="utf-8"))}
@@ -14,10 +16,24 @@ def test_arabic_digits_and_currency_are_normalized():
     assert normalize("أيوه، متاحة!") == "ايوه متاحه"
 
 
-def test_ranges_are_normalized():
-    assert contains("التوصيل من 1 لـ 2 يوم", "1-2")
-    assert contains("هيوصلك خلال ٢ - ٤ أيام", "2-4")
-    assert contains("من 3 إلى 6 أيام", "3-6")
+def test_arabic_letters_tashkeel_and_tatweel_are_normalized():
+    assert normalize("إسكندرية") == normalize("اسكندريه")
+    assert normalize("آخر") == normalize("اخر")
+    assert normalize("مستشفى") == normalize("مستشفي")
+    assert normalize("مُتَاحٌ") == "متاح"           # tashkeel
+    assert normalize("بـــ 950") == "ب 950"         # tatweel
+    assert contains("أيوةٌ متاحـة", "ايوه متاحه")
+
+
+@pytest.mark.parametrize("text", ["2-4", "2 لـ 4", "2 ل 4", "من 2 ل 4", "من ٢ لـ ٤", "٢-٤", "2 – 4",
+                                  "2 إلى 4", "من 2 لحد 4", "بين 2 و 4", "2 to 4", "خلال ٢ - ٤ أيام"])
+def test_ranges_in_any_form(text):
+    assert contains(f"التوصيل {text} أيام", "2-4")
+
+
+def test_ranges_do_not_match_other_ranges():
+    assert not contains("من 3 لـ 6 أيام", "2-4")
+    assert not contains("12-4", "2-4")
 
 
 def test_sizes_and_numbers_need_clean_edges():
@@ -33,6 +49,34 @@ def test_spaces_are_optional():
     assert contains("مشمتاح", "مش متاح")
 
 
+def test_forbidden_phrase_ignores_negation_and_word_parts():
+    assert says("أنصحك بمقاس XL", "مقاس XL")
+    assert not says("مقاس L، مش مقاس XL", "مقاس XL")
+    assert says("أيوه بنقبل فيزا", "بنقبل فيزا")
+    assert not says("للأسف مش بنقبل فيزا", "بنقبل فيزا")
+    assert not says("مفيه XXL", "فيه XXL")           # "فيه" inside "مفيه" is not the word "فيه"
+    assert says("وفيه XXL كمان", "فيه XXL")           # an attached و is fine
+    assert not says("لا مش خلصان، موجود", "خلصان")
+    assert says("لا، XL مش متاح", "XL مش متاح")       # a negative phrase still counts after لا
+
+
+def test_correct_replies_are_not_failed_by_forbidden_words():
+    # Each reply is right; the old single-word lists would have failed it.
+    assert grade(QUESTIONS["q19"], {"reply": "أيوه سؤال حلو، بس للأسف مش بنقبل فيزا، تقدر تدفع كاش أو فودافون كاش",
+                                    "handoff": False})["correct"]
+    assert grade(QUESTIONS["q24"], {"reply": "مقاس L هيبقى مظبوط عليك، مش XL", "handoff": False})["correct"]
+    assert grade(QUESTIONS["q04"], {"reply": "أيوه عندنا التيشيرت، بس للأسف مفيش XXL، أكبر مقاس XL",
+                                    "handoff": False})["correct"]
+    assert grade(QUESTIONS["q22"], {"reply": "أيوه متاح، مفيش مشكلة، الكاكي موجود XL", "handoff": False})["correct"]
+
+
+def test_wrong_replies_still_fail():
+    assert not grade(QUESTIONS["q19"], {"reply": "أيوه بنقبل فيزا", "handoff": False})["correct"]
+    assert not grade(QUESTIONS["q24"], {"reply": "مقاسك XL", "handoff": False})["correct"]
+    assert not grade(QUESTIONS["q04"], {"reply": "أيوه فيه XXL", "handoff": False})["correct"]
+    assert not grade(QUESTIONS["q22"], {"reply": "للأسف مفيش XL في الكاكي", "handoff": False})["correct"]
+
+
 def test_grade_correct_answer():
     r = grade(QUESTIONS["q01"], {"reply": "الهودي التقيل بـ ١٢٥٠ جنيه", "handoff": False})
     assert r == {"correct": True, "problems": []}
@@ -40,7 +84,7 @@ def test_grade_correct_answer():
 
 def test_grade_wrong_size_advice():
     r = grade(QUESTIONS["q24"], {"reply": "أنصحك بمقاس XL", "handoff": False})
-    assert not r["correct"] and "forbidden: XL" in r["problems"]
+    assert not r["correct"] and "forbidden: مقاس XL" in r["problems"]
 
 
 def test_grade_handoff_mismatch():

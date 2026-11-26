@@ -28,7 +28,7 @@ import httpx
 import openai
 from dotenv import load_dotenv
 from openai import OpenAI
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, PrivateAttr, ValidationError
 
 ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(ROOT / ".env")
@@ -112,6 +112,7 @@ class BotReply(BaseModel):
     reply: str
     handoff: bool
     reason: str
+    _usage: dict | None = PrivateAttr(default=None)   # token counts of the call that produced it
 
 
 # ---------- model calls ----------
@@ -163,7 +164,7 @@ def build_messages(message, history, system_prompt=None):
 
 
 def complete(provider, model, messages):
-    """One raw chat-completions call. Returns (text, response headers)."""
+    """One raw chat-completions call. Returns (text, response headers, token usage dict or None)."""
     raw = get_client(provider).chat.completions.with_raw_response.create(
         model=model,
         messages=messages,
@@ -173,7 +174,11 @@ def complete(provider, model, messages):
         **reasoning_params(provider, model),
     )
     response = raw.parse()
-    return response.choices[0].message.content or "", raw.headers
+    usage = None
+    if response.usage:
+        usage = {"input": response.usage.prompt_tokens, "output": response.usage.completion_tokens,
+                 "total": response.usage.total_tokens}
+    return response.choices[0].message.content or "", raw.headers, usage
 
 
 def parse_reply(text):
@@ -194,7 +199,13 @@ def call_model(provider, model, messages):
     The SDK timeout alone did not always stop slow replies, so the call runs in a worker thread
     and we stop waiting after CALL_TIMEOUT_SECONDS.
     """
-    future = _executor.submit(lambda: parse_reply(complete(provider, model, messages)[0]))
+    def run():
+        out = complete(provider, model, messages)
+        reply = parse_reply(out[0])
+        reply._usage = out[2] if len(out) > 2 else None
+        return reply
+
+    future = _executor.submit(run)
     try:
         return future.result(timeout=CALL_TIMEOUT_SECONDS)
     except FutureTimeout:
@@ -287,6 +298,7 @@ def answer(message, history=None):
         "retries": 0,
         "attempts": [],          # [{"model": "provider:model", "result": "ok"|error|skip, "ms": int}]
         "breaker_events": [],
+        "usage": None,           # token counts of the successful call
     }
 
     reply = None
@@ -303,7 +315,8 @@ def answer(message, history=None):
                 reply = call_model(provider, model, messages)
                 record_success(key)
                 meta["attempts"].append({"model": key, "result": "ok", "ms": _ms(t0)})
-                meta.update(provider=provider, model_used=model, fallback_used=key != first)
+                meta.update(provider=provider, model_used=model, fallback_used=key != first,
+                            usage=getattr(reply, "_usage", None))
             except Exception as exc:
                 kind = error_type(exc)
                 log.warning("model %s failed (%s): %s", key, kind, exc)
@@ -370,6 +383,7 @@ def log_request(meta):
         "attempts": meta.get("attempts", []),
         "breaker_events": meta.get("breaker_events", []),
         "limit_hit": meta.get("limit_hit"),   # "visitor" | "global" | None
+        "usage": meta.get("usage"),           # {"input", "output", "total"} tokens
     }
     with _log_lock:
         LOG_FILE.parent.mkdir(parents=True, exist_ok=True)

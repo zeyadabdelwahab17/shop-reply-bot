@@ -1,10 +1,18 @@
 name: eval
 
-# The REAL eval (31 questions, real Groq calls). Manual only: free-tier quota.
+# REAL eval with real Groq calls. Manual only, and rare: Groq's free tier allows ~200k tokens/day for
+# qwen per ORGANIZATION (a second key doesn't help), and the live demo uses the same budget.
+#   smoke (default): 10 key questions, ~25k tokens  -> quick check after a change
+#   full:            31 questions,     ~78k tokens  -> ~40% of the daily budget, run rarely
 # Needs the repo secret GROQ_API_KEY (Settings -> Secrets and variables -> Actions).
 on:
   workflow_dispatch:
     inputs:
+      set:
+        description: "smoke (10 questions) or full (31 questions)"
+        type: choice
+        options: [smoke, full]
+        default: smoke
       prompt:
         description: "Prompt version (v2, v3)"
         default: "v2"
@@ -13,13 +21,15 @@ on:
         default: "groq:qwen/qwen3.8-27b"
 
 env:
-  # Best score on 26 Nov 2026: 100.0% (qwen/qwen3.8-27b, prompt v2, 31/31). Threshold = best - 5 points.
-  MIN_ACCURACY: "95"
+  # full: 5 points under the lowest of today's main-set runs (set after the 26 Nov 2026 runs).
+  MIN_ACCURACY_FULL: "95"
+  # smoke: 10 questions, so one miss = 90%. Allows one miss.
+  MIN_ACCURACY_SMOKE: "90"
 
 jobs:
   eval:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -32,13 +42,16 @@ jobs:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           MODEL: ${{ inputs.model }}
           PROMPT: ${{ inputs.prompt }}
+          SET: ${{ inputs.set }}
         run: |
           rm -f evals/results/*.json   # upload only this run's results
-          python evals/run_eval.py --model "$MODEL" --prompt "$PROMPT" --fresh --no-mlflow --min-accuracy "$MIN_ACCURACY"
+          if [ "$SET" = "full" ]; then QSET=main; MIN="$MIN_ACCURACY_FULL"; else QSET=smoke; MIN="$MIN_ACCURACY_SMOKE"; fi
+          python evals/run_eval.py --model "$MODEL" --prompt "$PROMPT" --set "$QSET" \
+            --fresh --no-mlflow --min-accuracy "$MIN"
       - name: Upload results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: eval-results
+          name: eval-results-${{ inputs.set }}
           path: evals/results/*.json
           if-no-files-found: warn

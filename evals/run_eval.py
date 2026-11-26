@@ -31,7 +31,19 @@ sys.path.insert(0, str(ROOT))
 from app import bot  # noqa: E402
 from evals.grading import grade  # noqa: E402
 
-QUESTIONS_FILE = ROOT / "evals" / "questions.json"
+QUESTION_SETS = {"main": ROOT / "evals" / "questions.json", "holdout": ROOT / "evals" / "holdout.json",
+                 "smoke": ROOT / "evals" / "questions.json"}
+# Smoke set: 10 key questions from the main set for quick CI checks (~25k Groq tokens instead of ~78k).
+SMOKE_IDS = ["q01", "q07", "q11", "q19", "q21", "q24", "q26", "q27", "q28", "q31"]
+#            price  stock  ship   pay    franco size   hand   catalog hand   inject
+
+
+def load_questions(set_name):
+    questions = json.loads(QUESTION_SETS[set_name].read_text(encoding="utf-8"))
+    if set_name == "smoke":
+        by_id = {q["id"]: q for q in questions}
+        questions = [by_id[i] for i in SMOKE_IDS]
+    return questions
 RESULTS_DIR = ROOT / "evals" / "results"
 MLRUNS_DIR = ROOT / "mlruns"
 TRACKING_URI = "sqlite:///" + (MLRUNS_DIR / "mlflow.db").as_posix()
@@ -105,7 +117,7 @@ def call_pinned(provider, model, messages, pacer):
         t0 = time.monotonic()
         future = bot._executor.submit(bot.complete, provider, model, messages)
         try:
-            text, headers = future.result(timeout=bot.CALL_TIMEOUT_SECONDS)
+            text, headers, *_ = future.result(timeout=bot.CALL_TIMEOUT_SECONDS)
             pacer.update(headers)
             return text, round((time.monotonic() - t0) * 1000)
         except Exception as exc:
@@ -126,6 +138,17 @@ def call_pinned(provider, model, messages, pacer):
             print(f"    ({kind}, try {attempt}/{MAX_TRIES}, waiting {pause:.0f}s)")
             time.sleep(pause)
     raise RuntimeError(last)
+
+
+MAX_QUOTA_WAIT_SECONDS = 40 * 60
+
+
+def quota_wait_seconds(error):
+    """Groq's daily token limit refills gradually and says "Please try again in 9m1.7s". Returns seconds,
+    or None if no usable time is given (or it is longer than MAX_QUOTA_WAIT_SECONDS)."""
+    m = re.search(r"try again in ([\dhms.]+)", error)
+    seconds = parse_seconds(m.group(1)) if m else None
+    return seconds if seconds is not None and seconds <= MAX_QUOTA_WAIT_SECONDS else None
 
 
 def is_json_failure(error):
@@ -227,8 +250,9 @@ def log_to_mlflow(run_info, metrics, per_category, results_path):
     if mlflow.get_experiment_by_name(EXPERIMENT) is None:
         mlflow.create_experiment(EXPERIMENT, artifact_location=(MLRUNS_DIR / "artifacts").as_uri())
     mlflow.set_experiment(EXPERIMENT)
-    with mlflow.start_run(run_name=f"{run_info['model']} {run_info['prompt_version']}") as run:
+    with mlflow.start_run(run_name=f"{run_info['model']} {run_info['prompt_version']} {run_info.get('question_set', 'main')}") as run:
         mlflow.log_params({"model": run_info["model"], "prompt_version": run_info["prompt_version"],
+                           "question_set": run_info.get("question_set", "main"),
                            "question_count": metrics["questions"], "temperature": bot.TEMPERATURE})
         mlflow.set_tags({"git_commit": run_info["git_commit"] or "unknown", "grader": "deterministic"})
         mlflow.log_metrics({k: v for k, v in metrics.items() if isinstance(v, (int, float))})
@@ -238,7 +262,8 @@ def log_to_mlflow(run_info, metrics, per_category, results_path):
 
 
 def print_report(run_info, metrics, per_category, records):
-    print(f"\n=== {run_info['model']} | {run_info['prompt_version']} | {metrics['questions']} questions")
+    print(f"\n=== {run_info['model']} | {run_info['prompt_version']} | "
+          f"{run_info.get('question_set', 'main')} set | {metrics['questions']} questions")
     rows = [("accuracy", f"{metrics['accuracy']}%  ({metrics['correct']}/{metrics['graded']} graded)"),
             ("invalid (call failed)", metrics["invalid"]),
             ("false handoffs", metrics["false_handoffs"]),
@@ -271,17 +296,23 @@ def main():
     ap.add_argument("--regrade", help="results JSON: grade its stored replies again (no API calls), "
                                       "update the file and log it to MLflow")
     ap.add_argument("--prompt", default=bot.PROMPT_VERSION, help="v2, v3 or system_v3")
+    ap.add_argument("--set", choices=list(QUESTION_SETS), default="main",
+                    help="main = evals/questions.json (31), holdout = evals/holdout.json (15, never tuned on), "
+                         "smoke = 10 key questions of the main set (quick CI check)")
     ap.add_argument("--limit", type=int, help="only the first N questions")
     ap.add_argument("--fresh", action="store_true", help="ignore saved progress")
     ap.add_argument("--wait", type=float, default=6, help="seconds between calls without rate-limit headers")
     ap.add_argument("--min-accuracy", type=float, help="exit 1 if accuracy (%%) is below this")
     ap.add_argument("--no-mlflow", action="store_true")
+    ap.add_argument("--wait-for-quota", action="store_true",
+                    help="on Groq's daily token limit, wait the time Groq names (up to 40 min) and continue")
     args = ap.parse_args()
 
     if args.regrade:
         path = Path(args.regrade).resolve()
         data = json.loads(path.read_text(encoding="utf-8"))
-        records = regrade(data["results"], json.loads(QUESTIONS_FILE.read_text(encoding="utf-8")))
+        records = regrade(data["results"],
+                          load_questions(data["run"].get("question_set", "main")))
         metrics, per_category = compute_metrics(records)
         data.update(metrics=metrics, per_category=per_category, results=records)
         data["run"]["regraded_at"] = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
@@ -300,9 +331,9 @@ def main():
     prompt_version = args.prompt if args.prompt.startswith("system_") else f"system_{args.prompt}"
     system_prompt = bot.build_system_prompt(prompt_version)
 
-    questions = json.loads(QUESTIONS_FILE.read_text(encoding="utf-8"))[: args.limit]
+    questions = load_questions(args.set)[: args.limit]
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    name = f"{slug(provider + '-' + model)}_{prompt_version}"
+    name = f"{slug(provider + '-' + model)}_{prompt_version}" + ("" if args.set == "main" else f"_{args.set}")
     partial = RESULTS_DIR / f"{name}.partial.jsonl"
 
     done = {}
@@ -322,11 +353,18 @@ def main():
         if q["id"] in done and done[q["id"]]["question"] == q["question"]:
             records.append(done[q["id"]])
             continue
-        try:
-            r = run_question(q, provider, model, system_prompt, pacer)
-        except DailyQuotaUsedUp as exc:
-            print(f"\nDaily quota used up ({exc}).\nProgress saved in {partial}; run the same command later.")
-            sys.exit(2)
+        while True:
+            try:
+                r = run_question(q, provider, model, system_prompt, pacer)
+                break
+            except DailyQuotaUsedUp as exc:
+                pause = quota_wait_seconds(str(exc))
+                if not args.wait_for_quota or pause is None:
+                    print(f"\nDaily quota used up ({exc}).\nProgress saved in {partial}; run the same command later.")
+                    sys.exit(2)
+                print(f"    (daily token quota: Groq says retry in {pause:.0f}s, waiting; progress is saved)",
+                      flush=True)
+                time.sleep(pause + 5)
         records.append(r)
         with open(partial, "a", encoding="utf-8") as f:
             f.write(json.dumps(r, ensure_ascii=False) + "\n")
@@ -335,7 +373,7 @@ def main():
 
     metrics, per_category = compute_metrics(records)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
-    run_info = {"model": f"{provider}:{model}", "prompt_version": prompt_version,
+    run_info = {"model": f"{provider}:{model}", "prompt_version": prompt_version, "question_set": args.set,
                 "timestamp": stamp, "git_commit": git_commit(), "grader": "evals/grading.py"}
     results_path = RESULTS_DIR / f"{stamp}_{name}.json"
     results_path.write_text(json.dumps({"run": run_info, "metrics": metrics, "per_category": per_category,

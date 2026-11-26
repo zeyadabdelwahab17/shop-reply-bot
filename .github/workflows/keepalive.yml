@@ -1,0 +1,23 @@
+name: keep-alive
+
+# Render's free service sleeps after ~15 min without traffic (~1 min to wake up). Ping /health every
+# 14 minutes from 08:00 to 02:00 Cairo time so visitors don't hit a cold start.
+# Cron is UTC. Cairo is UTC+2 in winter and UTC+3 in summer (DST), so 05:00-23:59 UTC covers
+# 08:00-02:00 Cairo in both seasons (one extra hour at one end).
+# GitHub may delay scheduled runs at busy times, so an occasional cold start can still happen.
+on:
+  schedule:
+    - cron: "*/14 5-23 * * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Ping /health
+        env:
+          # Repo variable RENDER_URL (Settings -> Secrets and variables -> Actions -> Variables), if the
+          # Render URL is not the default one.
+          URL: ${{ vars.RENDER_URL || 'https://shop-reply-bot.onrender.com' }}
+        run: curl --fail --silent --show-error --retry 3 --retry-delay 20 --max-time 90 "$URL/health"

@@ -63,6 +63,20 @@ def test_question_ids_unique_and_mix_correct():
     assert [q["id"] for q in injection] == ["q31"] and not injection[0]["should_handoff"]
 
 
+def test_holdout_set_is_complete_and_separate():
+    holdout = load(ROOT / "evals" / "holdout.json")
+    assert len(holdout) == 15
+    for q in holdout:
+        assert QUESTION_FIELDS <= q.keys(), f"{q.get('id')} is missing fields"
+        assert q["id"].startswith("h")
+        if not q["should_handoff"]:
+            assert q["must_contain"], f"{q['id']} has nothing to check"
+    # Never the same question in both sets: the holdout is not tuned on.
+    main_questions = {q["question"] for q in load(QUESTIONS_FILE)}
+    assert not main_questions & {q["question"] for q in holdout}
+    assert {q["id"] for q in holdout if q["should_handoff"]} == {"h03", "h06", "h11"}
+
+
 def test_q01_accepts_either_hoodie_price():
     q01 = next(q for q in load(QUESTIONS_FILE) if q["id"] == "q01")
     assert q01["must_contain"] == [{"any_of": ["1250", "1400"]}]

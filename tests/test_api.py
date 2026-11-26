@@ -8,7 +8,7 @@ import openai
 import pytest
 from fastapi.testclient import TestClient
 
-from app import bot, main
+from app import bot, main, monitoring
 from app.main import app
 from scripts.fallback_report import load_records, summarize
 
@@ -43,11 +43,17 @@ def isolated(tmp_path, monkeypatch):
     monkeypatch.setattr(bot, "LOG_FILE", tmp_path / "requests.jsonl")
     monkeypatch.setattr(bot, "RETRY_WAIT_SECONDS", 0)
     monkeypatch.setattr(bot, "CHAIN", list(CHAIN))
+    # Never send real traces from tests, even if Langfuse keys are in the local .env.
+    monkeypatch.setattr(monitoring, "send_trace", lambda record: None)
+    for key in ("LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY"):
+        monkeypatch.delenv(key, raising=False)
     bot.reset_state()
     main.reset_usage()
+    monitoring.reset_local()
     yield tmp_path / "requests.jsonl"
     bot.reset_state()
     main.reset_usage()
+    monitoring.reset_local()
 
 
 def fake_models(monkeypatch, behaviour):
@@ -266,6 +272,7 @@ def test_log_has_no_message_text_or_ip(monkeypatch, isolated):
     assert set(last_log(isolated)) == {
         "timestamp", "prompt_version", "model_tried_first", "provider", "model_used", "fallback_used",
         "error_type", "retries", "latency_ms", "handoff", "reason", "attempts", "breaker_events", "limit_hit",
+        "usage",
     }
 
 

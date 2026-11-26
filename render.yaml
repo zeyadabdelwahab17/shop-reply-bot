@@ -1,0 +1,47 @@
+# Render Blueprint: one free web service. Secrets are NOT here: "sync: false" makes Render ask for them
+# in the dashboard when the Blueprint is created. Never put a key in this file.
+services:
+  - type: web
+    name: shop-reply-bot
+    runtime: python
+    plan: free
+    region: frankfurt          # closest Render region to Egypt
+    branch: main
+    autoDeployTrigger: checksPass   # deploy on every push to main, but only after the GitHub tests pass
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      # Same as the local .venv. Render accepts "any released version from 3.7.3 onward" (full version
+      # required for this variable); the first build log confirms it. Render's default is 3.14.10.
+      - key: PYTHON_VERSION
+        value: "3.14.5"
+      # Visitor IP = X-Forwarded-For entry this many hops from the right (the one our proxy appended).
+      - key: TRUSTED_PROXY_HOPS
+        value: "1"
+      # ON for the first deploy only, to check which entry Render's proxy adds (GET /debug/ip echoes the
+      # caller's own headers, nothing is logged). Set to "0" after the check.
+      - key: IP_DEBUG
+        value: "1"
+      - key: APP_ENV
+        value: production
+      - key: LLM_CHAIN
+        value: groq:qwen/qwen3.8-27b,gemini:gemini-3.5-flash,gemini:gemini-3.1-flash-lite
+      - key: PROMPT_VERSION
+        value: system_v2
+      - key: DEMO_MAX_PER_VISITOR
+        value: "15"
+      # Free capacity is ~120 chats/day (Groq qwen 200k tokens/day = ~80, plus ~20 per Gemini model).
+      - key: DEMO_DAILY_CAP
+        value: "100"
+      # Set by you in the Render dashboard:
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: LANGFUSE_PUBLIC_KEY
+        sync: false
+      - key: LANGFUSE_SECRET_KEY
+        sync: false
+      - key: LANGFUSE_HOST
+        sync: false

@@ -28,7 +28,7 @@ LIMIT_HEADERS = {
 def run_one(provider, model, question):
     t0 = time.monotonic()
     try:
-        text, headers = bot.complete(provider, model, bot.build_messages(question, []))
+        text, headers, *_ = bot.complete(provider, model, bot.build_messages(question, []))
     except Exception as exc:
         return {"ok": False, "error": f"{bot.error_type(exc)}: {exc}"[:300], "ms": _ms(t0)}
     out = {"ok": True, "ms": _ms(t0), "raw": text,

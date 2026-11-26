@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ميدان ١٣ | دقة البوت</title>
+<style>
+  :root {
+    --header: #008069; --header-text: #ffffff; --chat-bg: #efeae2; --card: #ffffff;
+    --text: #111b21; --muted: #667781; --good: #008069; --warn: #b54708; --line: #e9edef;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    font-family: "Segoe UI", Tahoma, "Noto Sans Arabic", Arial, sans-serif;
+    background: var(--chat-bg); color: var(--text);
+    display: flex; justify-content: center;
+  }
+  .app { width: 100%; max-width: 720px; min-height: 100vh; background: var(--chat-bg);
+         box-shadow: 0 0 12px rgba(0,0,0,.08); }
+  header { background: var(--header); color: var(--header-text); display: flex; align-items: center;
+           gap: 12px; padding: 10px 16px; padding-top: max(10px, env(safe-area-inset-top)); }
+  .avatar { width: 40px; height: 40px; border-radius: 50%; background: #fff; color: var(--header);
+            display: grid; place-items: center; font-weight: 700; font-size: 16px; flex: none; }
+  .title { font-size: 17px; font-weight: 600; line-height: 1.2; }
+  .subtitle { font-size: 13px; opacity: .85; }
+  header a { margin-inline-start: auto; color: #fff; font-size: 13px; opacity: .9; }
+  main { padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+  .card { background: var(--card); border-radius: 8px; padding: 14px 16px;
+          box-shadow: 0 1px .5px rgba(11,20,26,.13); }
+  h2 { font-size: 15px; margin: 0 0 10px; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; }
+  .tile { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+  .tile .label { font-size: 12.5px; color: var(--muted); }
+  .tile .value { font-size: 24px; font-weight: 700; margin-top: 2px; font-variant-numeric: tabular-nums; }
+  .tile .sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .meta { font-size: 12.5px; color: var(--muted); margin-top: 10px; line-height: 1.6; }
+  .story { font-size: 14px; line-height: 1.7; }
+  .story b { color: var(--warn); }
+  .ltr { direction: ltr; unicode-bidi: embed; }
+  .note { font-size: 12.5px; color: var(--muted); margin-top: 10px; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="avatar">١٣</div>
+    <div>
+      <div class="title">ميدان ١٣ — دقة البوت</div>
+      <div class="subtitle">أرقام متقاسة، مش وعود</div>
+    </div>
+    <a href="/">جرّب البوت ←</a>
+  </header>
+  <main>
+    <section class="card">
+      <h2>آخر تقييم (eval)</h2>
+      <div class="tiles">
+        <div class="tile"><div class="label">الدقة على الأسئلة الأساسية</div>
+          <div class="value" id="main-mean">—</div><div class="sub" id="main-sub"></div></div>
+        <div class="tile"><div class="label">الدقة على أسئلة جديدة (holdout)</div>
+          <div class="value" id="holdout">—</div><div class="sub" id="holdout-sub"></div></div>
+      </div>
+      <div class="meta" id="eval-meta"></div>
+      <div class="note">التصحيح أوتوماتيك وثابت (من غير LLM بيحكم): الرد صح بس لو فيه المعلومات الصح، مفيهوش معلومة غلط، والتحويل لحد من المحل في مكانه.
+        أسئلة الـ holdout اتكتبت كعميل حقيقي ومبنعدلش البرومبت عشانها.</div>
+    </section>
+
+    <section class="card story">
+      <h2>ليه v2 مش v3؟</h2>
+      برومبت v3 كان المفروض يحسّن الردود، بس <b>اترفض</b>: قال إن تيشيرت خلصان "أيوه متوفر". اخترنا v2 (100% مقابل 93.5% على 31 سؤال).
+    </section>
+
+    <section class="card">
+      <h2>الاستخدام الحي</h2>
+      <div class="tiles">
+        <div class="tile"><div class="label">عدد الرسايل</div><div class="value" id="requests">—</div></div>
+        <div class="tile"><div class="label">موديل احتياطي (fallback)</div><div class="value" id="fallback">—</div></div>
+        <div class="tile"><div class="label">اتحولت لحد من المحل</div><div class="value" id="handoff">—</div></div>
+        <div class="tile"><div class="label">متوسط وقت الرد</div><div class="value" id="latency">—</div></div>
+        <div class="tile"><div class="label">وصلت لحد الديمو</div><div class="value" id="limits">—</div></div>
+      </div>
+      <div class="note" id="live-note"></div>
+    </section>
+  </main>
+</div>
+<script>
+  const $ = (id) => document.getElementById(id);
+  const pct = (v) => (v === null || v === undefined) ? "—" : `${v}%`;
+  const day = (d) => d ? `${d.slice(6, 8)}/${d.slice(4, 6)}/${d.slice(0, 4)}` : "";
+
+  fetch("/stats.json").then((r) => r.json()).then(({ eval: ev, live }) => {
+    if (ev.main) {
+      $("main-mean").textContent = pct(ev.main.mean);
+      $("main-sub").textContent = `متوسط ${ev.main.runs} مرات، أقل نتيجة ${ev.main.min}% — ${ev.main.questions} سؤال`;
+    }
+    if (ev.holdout) {
+      $("holdout").textContent = pct(ev.holdout.accuracy);
+      $("holdout-sub").textContent = `${ev.holdout.correct} من ${ev.holdout.graded} سؤال`;
+    }
+    const m = ev.main || ev.holdout;
+    if (m) {
+      $("eval-meta").innerHTML = `التاريخ: ${day(m.date)} · البرومبت: <span class="ltr">${ev.prompt_version}</span>` +
+        ` · الموديل: <span class="ltr">${m.model}</span>`;
+    }
+    $("requests").textContent = live.requests;
+    $("fallback").textContent = pct(live.fallback_pct);
+    $("handoff").textContent = pct(live.handoff_pct);
+    $("latency").textContent = live.avg_latency_ms === null ? "—" : `${(live.avg_latency_ms / 1000).toFixed(1)} ث`;
+    $("limits").textContent = live.limit_hits;
+    const src = live.source === "langfuse"
+      ? "المصدر: Langfuse — كل الرسايل من أول ما البوت اشتغل أونلاين (مش بتتمسح مع الريستارت)."
+      : "المصدر: ذاكرة السيرفر — العدّاد بيتصفّر مع كل ريستارت أو deploy.";
+    $("live-note").textContent = src + " مفيش نص رسايل أو أرقام تليفونات بتتسجل.";
+  }).catch(() => { $("live-note").textContent = "مقدرناش نحمّل الأرقام دلوقتي."; });
+</script>
+</body>
+</html>

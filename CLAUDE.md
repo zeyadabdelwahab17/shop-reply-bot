@@ -20,7 +20,7 @@ Small and focused: one problem, solved well, easy to see. No extra features.
 - No vector DB: the whole shop file goes into the prompt as context
 - Tests: pytest. CI: GitHub Actions
 - Monitoring: Langfuse Cloud free Hobby plan
-- Hosting: Google Cloud Run free tier
+- Hosting: Render free web service (no card; `render.yaml`). If Render ever asks for a card: Vercel Hobby.
 - Simple WhatsApp-style HTML chat page served by FastAPI
 
 ## Plan
@@ -29,7 +29,7 @@ Small and focused: one problem, solved well, easy to see. No extra features.
 - Day 3: evals + MLflow to compare prompt versions / models + CI (GitHub Actions) — **DONE (26 Nov 2026)**
   Mocked pytest runs on every push; the real 30-question eval runs only on manual trigger
   (`workflow_dispatch`), because of the free-tier quota.
-- Day 4: deploy to Cloud Run + Langfuse monitoring + stats page + demo limits.
+- Day 4: held-out eval + deploy to Render + Langfuse monitoring + stats page + demo limits.
 - Day 5: handoff tickets:
   - ask for the customer's phone, validated in code (11 digits, starts with 010/011/012/015)
   - scripted no-LLM fallback reply when all models are down
@@ -114,4 +114,6 @@ Small and focused: one problem, solved well, easy to see. No extra features.
   v2 stays the default (`PROMPT_VERSION` env, default `system_v2`). v4 idea: explicit yes only after checking in_stock.
 - CI: `.github/workflows/tests.yml` (mocked pytest, every push/PR), `eval.yml` (manual, needs repo secret
   `GROQ_API_KEY`, fails below `MIN_ACCURACY: "95"`).
-- Tests: 43 passing.
+- Grader audit done (phrases + negation-aware must_not_contain). Final MLflow runs: v2 `6be3122a3d46492285caee47c1e471bb`,
+  v3 `62294a22c6a54b77974d73c8d11aefa7`.
+- Tests: 59 passing.
