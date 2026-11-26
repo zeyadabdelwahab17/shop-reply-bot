@@ -9,3 +9,8 @@ __pycache__/
 
 # request logs
 logs/
+
+# MLflow (local runs) and unfinished eval runs
+mlruns/
+mlflow.db
+evals/results/*.partial.jsonl

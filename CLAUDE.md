@@ -26,7 +26,7 @@ Small and focused: one problem, solved well, easy to see. No extra features.
 ## Plan
 - Day 1: data + repo setup — **DONE (24 Nov 2026)**
 - Day 2: the bot + chat page — **DONE (24 Nov 2026)**
-- Day 3: evals + MLflow to compare prompt versions / models + CI (GitHub Actions).
+- Day 3: evals + MLflow to compare prompt versions / models + CI (GitHub Actions) — **DONE (26 Nov 2026)**
   Mocked pytest runs on every push; the real 30-question eval runs only on manual trigger
   (`workflow_dispatch`), because of the free-tier quota.
 - Day 4: deploy to Cloud Run + Langfuse monitoring + stats page + demo limits.
@@ -99,3 +99,19 @@ Small and focused: one problem, solved well, easy to see. No extra features.
 - Input for prompt v3 (Day 3) is listed in `docs/BUILD_LOG.md` (q21 unclear yes/no, q27 suggested an
   out-of-stock item, size advice check, shorter rules text). Prompt v2 is unchanged.
 - Tests: 29 passing.
+
+## State after Day 3
+- `evals/questions.json`: 31 questions (q31 = prompt-injection discount, category `injection`, no handoff).
+  Each has `must_contain` (strings or `{"any_of": [...]}`) and `must_not_contain`; graded by `evals/grading.py`
+  (deterministic, normalizes Arabic digits/letters, ranges, currency; Latin sizes/numbers need clean edges).
+- `evals/run_eval.py --model groq:qwen/qwen3.8-27b --prompt v2`: one pinned model, Groq header pacing,
+  resume from `evals/results/*.partial.jsonl`, `--regrade <file>`, `--min-accuracy`. Failed call = invalid
+  (left out of accuracy); Groq "Failed to generate JSON" = invalid JSON (wrong).
+- MLflow: `mlruns/mlflow.db` (SQLite; MLflow 3.18 refuses the file store) + `mlruns/artifacts`, gitignored.
+  `requirements-eval.txt` adds mlflow (not needed by the app or CI). UI:
+  `.\.venv\Scripts\mlflow.exe ui --backend-store-uri sqlite:///mlruns/mlflow.db`
+- Results 26 Nov (qwen, 31 q): v2 100% (31/31), v3 93.5% (q08 said a sold-out tee is available, q12 invalid JSON).
+  v2 stays the default (`PROMPT_VERSION` env, default `system_v2`). v4 idea: explicit yes only after checking in_stock.
+- CI: `.github/workflows/tests.yml` (mocked pytest, every push/PR), `eval.yml` (manual, needs repo secret
+  `GROQ_API_KEY`, fails below `MIN_ACCURACY: "95"`).
+- Tests: 43 passing.

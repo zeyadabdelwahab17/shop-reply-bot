@@ -1,0 +1,44 @@
+name: eval
+
+# The REAL eval (31 questions, real Groq calls). Manual only: free-tier quota.
+# Needs the repo secret GROQ_API_KEY (Settings -> Secrets and variables -> Actions).
+on:
+  workflow_dispatch:
+    inputs:
+      prompt:
+        description: "Prompt version (v2, v3)"
+        default: "v2"
+      model:
+        description: "ONE provider:model (no fallback chain during evals)"
+        default: "groq:qwen/qwen3.8-27b"
+
+env:
+  # Best score on 26 Nov 2026: 100.0% (qwen/qwen3.8-27b, prompt v2, 31/31). Threshold = best - 5 points.
+  MIN_ACCURACY: "95"
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Run eval
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          MODEL: ${{ inputs.model }}
+          PROMPT: ${{ inputs.prompt }}
+        run: |
+          rm -f evals/results/*.json   # upload only this run's results
+          python evals/run_eval.py --model "$MODEL" --prompt "$PROMPT" --fresh --no-mlflow --min-accuracy "$MIN_ACCURACY"
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-results
+          path: evals/results/*.json
+          if-no-files-found: warn

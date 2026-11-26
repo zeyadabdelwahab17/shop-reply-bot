@@ -150,3 +150,42 @@ On free LLM tiers the bottleneck was tokens per minute, not requests per day: wi
 
 ### LinkedIn angle
 I cut the prompt by 9% by removing data the model never uses; on a tokens-per-minute free tier that is directly more customers per minute.
+
+---
+
+## Day 3 — evals, MLflow, prompt v3, CI (26 Nov 2026)
+
+### What was built
+- **Machine-gradable questions** (`evals/questions.json`, now 31): each question has `must_contain` (all items must match; `{"any_of": [...]}` when several answers are right, e.g. q01 accepts 1250 or 1400), `must_not_contain` (e.g. q24 must not say XL, q27 must not suggest the sold-out denim jacket or Nile tee), and `should_handoff`. `expected_answer` stays for humans. New **q31**: a prompt injection asking for a 50% discount (expected: polite refusal, no discount, no handoff).
+- **Deterministic grader** (`evals/grading.py`, no LLM judge). It normalizes both sides first: Arabic digits, `1,250`, ranges (`1 لـ 2` = `1-2`), currency (ج / ج.م / جنيه / EGP), أ/إ/آ/ى/ة, punctuation and spaces. Latin sizes and numbers need clean edges, so `L` does not match inside `XL`, and `7` does not match inside `17`.
+- **`evals/run_eval.py`:** pins ONE model (no fallback chain), paces calls with Groq's `x-ratelimit-remaining-tokens` / `reset-tokens` headers, saves progress after every question and resumes, `--limit`, `--prompt`, `--min-accuracy`, `--regrade` (grade stored replies again, no API calls). A failed call is reported as **invalid** and left out of accuracy. Groq's "Failed to generate JSON" counts as **invalid JSON** (wrong), because it is the model's output that failed.
+- **MLflow** (local): params, metrics, per-category accuracy and the results JSON as an artifact. MLflow 3.18 refuses the plain `./mlruns` file store, so runs go to `mlruns/mlflow.db` (SQLite) with artifacts in `mlruns/artifacts`. There is still no server.
+- **Prompt v3** (`app/prompts/system_v3.txt`, v2 kept): adds (1) a clear "أيوه متاح" when the product/size/color is in stock, and (2) "suggest only in-stock products".
+- **CI:** `tests.yml` (mocked pytest on every push/PR) and `eval.yml` (manual, real eval, fails below 95%).
+
+### v2 vs v3 (qwen/qwen3.8-27b, 31 questions, one run each)
+| | v2 | v3 |
+|---|---|---|
+| Accuracy | **100.0% (31/31)** | 93.5% (29/31) |
+| False handoffs | 0 | 0 |
+| Missed handoffs | 0 | 0 |
+| Invalid JSON | 0 | 1 (q12) |
+| Invalid (call failed) | 0 | 0 |
+| Latency avg / p95 | 506 / 837 ms | 582 / 803 ms |
+| MLflow run | `67b3a458b8c84a36b3fcd7ff03b4ea5a` | `e0fc3e1ca299467d9c0754177b8bc82c` |
+
+v3 failures:
+- **q08 (serious):** "تيشيرت النيل الكحلي موجود؟" → "أيوه … متوفر … بـ 550 جنيه". The product is `in_stock: false`. The new "start with أيوه متاح" rule pushed the model into a confident wrong yes. That is worse than the vague wording it was meant to fix.
+- **q12:** Groq returned 400 "Failed to generate JSON". This is probably random (v2 answered it fine), but in production it would fall through to Gemini.
+
+**Decision: v2 stays the default.** v3 adds a hallucinated "in stock" for a sold-out item. A prompt v4 should only ask for an explicit yes *after* checking `in_stock` (for example "check in_stock first; if false say it is sold out; only if true say أيوه متاح").
+
+### What went wrong / honest notes
+- **The grader was fixed once after the first pass.** Two correct replies were marked wrong: v2 q04 "لا، … مش فيه مقاس XXL" and v3 q19 "مفيش، … بنقبل كاش …". I added "مش فيه"/"مفيهوش" (q04) and "مفيش" (q19) and re-graded both runs from their stored replies. The same grader was used for both prompts. Before the fix: v2 96.8%, v3 93.3% (with q12 counted as invalid). The decision is the same either way.
+- **The grader checks facts, not wording.** v2 passes q21 with "وإيه في مقاس XL متوفر" (awkward, the Day 2 issue is still there) and q27 with "ممكن تقترح عليك" (wrong person, should be "أقترح"). Arabic quality still needs a human read.
+- **One run per prompt.** At temperature 0.2, replies vary between runs; a 1-question difference (3.2 points) on 31 questions is within noise. The q08 regression is a clear failure mode, not noise.
+- 100% on 31 questions I wrote myself is not 100% in production. The eval set is small and the bot was tuned on it.
+- Pacing worked: no 429s. Each run took ~7 min (Groq waits of 39–52 s when fewer than 3000 tokens were left).
+
+### LinkedIn angle
+My "improved" prompt scored lower: asking the bot to say a clear "yes, it's available" made it say yes to a sold-out item. Without a fixed eval set I would have shipped it.

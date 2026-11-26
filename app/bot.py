@@ -34,8 +34,8 @@ ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(ROOT / ".env")
 
 SHOP_FILE = ROOT / "data" / "shop_info.json"
-PROMPT_VERSION = "system_v2"
-PROMPT_FILE = ROOT / "app" / "prompts" / f"{PROMPT_VERSION}.txt"
+PROMPTS_DIR = ROOT / "app" / "prompts"
+PROMPT_VERSION = os.getenv("PROMPT_VERSION", "system_v2")
 LOG_FILE = ROOT / "logs" / "requests.jsonl"
 
 PROVIDERS = {
@@ -97,9 +97,15 @@ def shop_for_prompt(shop):
 # Compact JSON keeps it small (Groq's free tier counts tokens per minute).
 SHOP = json.loads(SHOP_FILE.read_text(encoding="utf-8"))
 HANDOFF_MESSAGE = SHOP["handoff_message"]
-SYSTEM_PROMPT = PROMPT_FILE.read_text(encoding="utf-8").replace(
-    "{{SHOP_INFO}}", json.dumps(shop_for_prompt(SHOP), ensure_ascii=False, separators=(",", ":"))
-)
+
+
+def build_system_prompt(version):
+    """Rules from app/prompts/<version>.txt with the minified shop JSON inserted."""
+    text = (PROMPTS_DIR / f"{version}.txt").read_text(encoding="utf-8")
+    return text.replace("{{SHOP_INFO}}", json.dumps(shop_for_prompt(SHOP), ensure_ascii=False, separators=(",", ":")))
+
+
+SYSTEM_PROMPT = build_system_prompt(PROMPT_VERSION)
 
 
 class BotReply(BaseModel):
@@ -144,9 +150,9 @@ def reasoning_params(provider, model):
     return {}
 
 
-def build_messages(message, history):
+def build_messages(message, history, system_prompt=None):
     """System prompt + last N history items ({"role": "user"|"bot", "text"}) + the new message."""
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    messages = [{"role": "system", "content": system_prompt or SYSTEM_PROMPT}]
     for item in (history or [])[-HISTORY_LIMIT:]:
         role = "user" if item.get("role") == "user" else "assistant"
         text = str(item.get("text", "")).strip()
@@ -316,10 +322,7 @@ def answer(message, history=None):
     if reply is None:
         result = {"reply": HANDOFF_MESSAGE, "handoff": True, "reason": "all models failed"}
     else:
-        result = reply.model_dump()
-        # A handoff must always show the shop's exact handoff message.
-        if result["handoff"] and HANDOFF_MESSAGE not in result["reply"]:
-            result["reply"] = (result["reply"].strip() + "\n" + HANDOFF_MESSAGE).strip()
+        result = finalize(reply)
 
     meta["latency_ms"] = _ms(start)
     meta["handoff"] = result["handoff"]
@@ -327,6 +330,14 @@ def answer(message, history=None):
     log.info("answered by %s:%s (fallback=%s, latency=%sms)",
              meta["provider"], meta["model_used"], meta["fallback_used"], meta["latency_ms"])
     return result, meta
+
+
+def finalize(reply):
+    """BotReply -> result dict. A handoff must always show the shop's exact handoff message."""
+    result = reply.model_dump()
+    if result["handoff"] and HANDOFF_MESSAGE not in result["reply"]:
+        result["reply"] = (result["reply"].strip() + "\n" + HANDOFF_MESSAGE).strip()
+    return result
 
 
 def _ms(t0):

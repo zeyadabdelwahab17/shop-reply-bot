@@ -1,0 +1,3 @@
+# Local eval tracking only (not needed by the app or the CI tests)
+-r requirements.txt
+mlflow>=3
