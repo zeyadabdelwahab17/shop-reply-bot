@@ -34,6 +34,8 @@ PAGE_LIMIT = 1000                              # Langfuse max per page
 MAX_PAGES = 5                                  # 5000 requests; the demo cap is 150 requests/day
 STARTED_AT = datetime.now(timezone.utc)
 INGESTION_HEADERS = {"x-langfuse-ingestion-version": "4"}
+# Sent before the reply returns (serverless can cut off after-response work), so keep it short.
+SEND_TIMEOUT_SECONDS = 2.0
 # Verify TLS against the operating system's trust store (Windows store locally, system CAs on Render)
 # instead of httpx's bundled list, so it also works behind antivirus HTTPS scanning. Verification stays on.
 TLS = ssl.create_default_context()
@@ -108,15 +110,26 @@ def build_otlp(record, now=None):
         "scopeSpans": [{"scope": {"name": SERVICE}, "spans": spans}]}]}
 
 
+_send_client = None
+
+
+def _sender():
+    """One client per instance, so warm instances reuse the TLS connection to Langfuse."""
+    global _send_client
+    if _send_client is None:
+        _send_client = httpx.Client(timeout=SEND_TIMEOUT_SECONDS, verify=TLS)
+    return _send_client
+
+
 def send_trace(record):
-    """POST the trace to Langfuse. Called as a background task after the reply was sent."""
+    """POST the trace to Langfuse (synchronously, short timeout). Never raises."""
     cfg = _config()
     if not cfg:
         return
     pk, sk, host = cfg
     try:
-        r = httpx.post(f"{host}/api/public/otel/v1/traces", auth=(pk, sk), timeout=5, verify=TLS,
-                       headers=INGESTION_HEADERS, json=build_otlp(record))
+        r = _sender().post(f"{host}/api/public/otel/v1/traces", auth=(pk, sk),
+                           headers=INGESTION_HEADERS, json=build_otlp(record))
         if r.status_code >= 300:
             log.warning("langfuse ingestion: HTTP %s %s", r.status_code, r.text[:300])
     except Exception as exc:  # never break the chat because of monitoring
@@ -187,7 +200,7 @@ def _local_stats():
         "limit_hits": c["limit_hits"],
         "source": "memory",
         "since": STARTED_AT.isoformat(timespec="minutes"),
-        "note": "Counted in memory since the last restart (resets on every restart/deploy).",
+        "note": "Counted in memory by this server instance only (serverless: not shared, resets often).",
     }
 
 

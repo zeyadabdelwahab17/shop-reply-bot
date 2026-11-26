@@ -10,6 +10,10 @@ Failure handling per model:
 - anything else                        -> the next model
 - 3 failures in a row                  -> circuit breaker: skip this model for 60 s
 - all models fail                      -> the shop's handoff message (never raises)
+- 25 s total per request (REQUEST_BUDGET_SECONDS): no new attempt that could not finish in time
+
+On serverless (Vercel) instances share no memory, so quota/breaker state is also kept in the shared store
+(app/store.py, Upstash Redis). If the store is down, each instance keeps its own state (fail safe).
 """
 
 import copy
@@ -30,13 +34,16 @@ from dotenv import load_dotenv
 from openai import OpenAI
 from pydantic import BaseModel, PrivateAttr, ValidationError
 
+from app import store
+
 ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(ROOT / ".env")
 
 SHOP_FILE = ROOT / "data" / "shop_info.json"
 PROMPTS_DIR = ROOT / "app" / "prompts"
 PROMPT_VERSION = os.getenv("PROMPT_VERSION", "system_v2")
-LOG_FILE = ROOT / "logs" / "requests.jsonl"
+# Vercel's filesystem is read-only except /tmp (and /tmp is per instance and temporary).
+LOG_FILE = Path("/tmp/requests.jsonl") if os.getenv("VERCEL") else ROOT / "logs" / "requests.jsonl"
 
 PROVIDERS = {
     "groq": {"base_url": "https://api.groq.com/openai/v1", "key_env": "GROQ_API_KEY"},
@@ -52,6 +59,9 @@ RETRY_WAIT_SECONDS = 1        # wait before the single retry on 503 / timeout
 RETRYABLE_ERRORS = {"503", "timeout"}
 BREAKER_THRESHOLD = 3         # failures in a row that open the breaker
 BREAKER_SECONDS = 60
+REQUEST_BUDGET_SECONDS = 25   # whole request: worst case without it is 3 models x (12 s + retry) = ~75 s
+MIN_CALL_SECONDS = 3          # don't start a call with less time left than this
+FAILURE_MEMORY_SECONDS = 300  # "failures in a row" counter in the shared store expires after 5 min
 
 log = logging.getLogger("shop_bot")
 
@@ -193,12 +203,13 @@ def parse_reply(text):
 _executor = ThreadPoolExecutor(max_workers=8)
 
 
-def call_model(provider, model, messages):
+def call_model(provider, model, messages, timeout=None):
     """One call with a hard time limit. Returns a BotReply or raises.
 
     The SDK timeout alone did not always stop slow replies, so the call runs in a worker thread
-    and we stop waiting after CALL_TIMEOUT_SECONDS.
+    and we stop waiting after `timeout` (default CALL_TIMEOUT_SECONDS).
     """
+    timeout = timeout or CALL_TIMEOUT_SECONDS
     def run():
         out = complete(provider, model, messages)
         reply = parse_reply(out[0])
@@ -207,10 +218,10 @@ def call_model(provider, model, messages):
 
     future = _executor.submit(run)
     try:
-        return future.result(timeout=CALL_TIMEOUT_SECONDS)
+        return future.result(timeout=timeout)
     except FutureTimeout:
         future.cancel()
-        raise TimeoutError(f"{provider}:{model} took longer than {CALL_TIMEOUT_SECONDS}s") from None
+        raise TimeoutError(f"{provider}:{model} took longer than {timeout:.1f}s") from None
 
 
 def error_type(exc):
@@ -249,6 +260,67 @@ def reset_state():
         _breaker_until.clear()
 
 
+def _skey(kind, key):
+    """Shared-store key, e.g. "srb:quota:groq:qwen/qwen3.8-27b:2026-11-26"."""
+    return f"srb:{kind}:{key}" + (f":{date.today().isoformat()}" if kind == "quota" else "")
+
+
+def load_shared_health(keys):
+    """Copy the shared quota/breaker/failure state of these models into this instance (1 HTTP call)."""
+    if not store.enabled():
+        return
+    commands = []
+    for key in keys:
+        commands += [["EXISTS", _skey("quota", key)], ["PTTL", _skey("breaker", key)], ["GET", _skey("fail", key)]]
+    try:
+        results = store.run(commands)
+    except store.StoreDown as exc:
+        log.warning("shared store unavailable, using this instance's model health: %s", exc)
+        return
+    now = time.monotonic()
+    with _state_lock:
+        for i, key in enumerate(keys):
+            quota, breaker_ms, fails = results[3 * i: 3 * i + 3]
+            if quota:
+                _quota_used_up[key] = date.today()
+            if isinstance(breaker_ms, int) and breaker_ms > 0:
+                _breaker_until[key] = max(_breaker_until.get(key, 0), now + breaker_ms / 1000)
+            try:
+                _failures[key] = max(_failures.get(key, 0), int(fails or 0))
+            except (TypeError, ValueError):
+                pass
+
+
+def _share_failure(key, kind):
+    """Count the failure in the shared store. Returns the shared failures-in-a-row count, or None."""
+    if not store.enabled():
+        return None
+    commands = [["INCR", _skey("fail", key)], ["EXPIRE", _skey("fail", key), FAILURE_MEMORY_SECONDS]]
+    if kind == "quota_daily":
+        commands.append(["SET", _skey("quota", key), "1", "EX", 36 * 3600])
+    try:
+        return int(store.run(commands)[0])
+    except (store.StoreDown, TypeError, ValueError) as exc:
+        log.warning("shared store unavailable (failure not shared): %s", exc)
+        return None
+
+
+def _share_breaker(key):
+    if store.enabled():
+        try:
+            store.run([["SET", _skey("breaker", key), "1", "EX", BREAKER_SECONDS]])
+        except store.StoreDown as exc:
+            log.warning("shared store unavailable (breaker not shared): %s", exc)
+
+
+def _share_success(key):
+    if store.enabled():
+        try:
+            store.run([["DEL", _skey("fail", key)]])
+        except store.StoreDown as exc:
+            log.warning("shared store unavailable (success not shared): %s", exc)
+
+
 def skip_reason(key):
     """Why this model should be skipped right now, or None."""
     with _state_lock:
@@ -261,21 +333,29 @@ def skip_reason(key):
 
 def record_success(key):
     with _state_lock:
+        had_failures = _failures.get(key, 0) > 0
         _failures[key] = 0
         _breaker_until.pop(key, None)
+    if had_failures:   # only then is there a shared counter to clear (saves a call per request)
+        _share_success(key)
 
 
 def record_failure(key, kind):
     """Count a failure. Returns breaker/quota events to log."""
     events = []
+    shared_count = _share_failure(key, kind)
+    opened = False
     with _state_lock:
         if kind == "quota_daily":
             _quota_used_up[key] = date.today()
             events.append(f"quota_skip_today:{key}")
-        _failures[key] = _failures.get(key, 0) + 1
+        _failures[key] = max(_failures.get(key, 0) + 1, shared_count or 0)
         if _failures[key] >= BREAKER_THRESHOLD and _breaker_until.get(key, 0) <= time.monotonic():
             _breaker_until[key] = time.monotonic() + BREAKER_SECONDS
             events.append(f"breaker_open:{key}")
+            opened = True
+    if opened:
+        _share_breaker(key)
     return events
 
 
@@ -301,6 +381,8 @@ def answer(message, history=None):
         "usage": None,           # token counts of the successful call
     }
 
+    load_shared_health([f"{p}:{m}" for p, m in CHAIN])
+    deadline = start + REQUEST_BUDGET_SECONDS
     reply = None
     for provider, model in CHAIN:
         key = f"{provider}:{model}"
@@ -310,9 +392,13 @@ def answer(message, history=None):
             continue
         tried = 0
         while reply is None:
+            left = deadline - time.monotonic()
+            if left < MIN_CALL_SECONDS:
+                meta["attempts"].append({"model": key, "result": "skipped_budget", "ms": 0})
+                break
             t0 = time.monotonic()
             try:
-                reply = call_model(provider, model, messages)
+                reply = call_model(provider, model, messages, timeout=min(CALL_TIMEOUT_SECONDS, left))
                 record_success(key)
                 meta["attempts"].append({"model": key, "result": "ok", "ms": _ms(t0)})
                 meta.update(provider=provider, model_used=model, fallback_used=key != first,
@@ -329,7 +415,7 @@ def answer(message, history=None):
                     time.sleep(RETRY_WAIT_SECONDS)
                     continue
                 break
-        if reply is not None:
+        if reply is not None or deadline - time.monotonic() < MIN_CALL_SECONDS:
             break
 
     if reply is None:
@@ -385,10 +471,13 @@ def log_request(meta):
         "limit_hit": meta.get("limit_hit"),   # "visitor" | "global" | None
         "usage": meta.get("usage"),           # {"input", "output", "total"} tokens
     }
-    with _log_lock:
-        LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
-        with open(LOG_FILE, "a", encoding="utf-8") as f:
-            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    try:
+        with _log_lock:
+            LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+            with open(LOG_FILE, "a", encoding="utf-8") as f:
+                f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except OSError as exc:   # e.g. read-only filesystem: the log is a nice-to-have, the reply is not
+        log.warning("request log not written: %s", exc)
     return record
 
 

@@ -60,7 +60,7 @@ def fake_models(monkeypatch, behaviour):
     """behaviour: {model: [exception or BotReply, ...]} consumed in order. Returns the list of models called."""
     calls = []
 
-    def fake(provider, model, messages):
+    def fake(provider, model, messages, **kwargs):
         calls.append(model)
         outcome = behaviour[model].pop(0)
         if isinstance(outcome, Exception):
@@ -205,7 +205,7 @@ def test_handoff_reply_always_contains_handoff_message(monkeypatch):
 
 def test_slow_call_hits_hard_timeout(monkeypatch):
     monkeypatch.setattr(bot, "CALL_TIMEOUT_SECONDS", 0.1)
-    monkeypatch.setattr(bot, "complete", lambda p, m, msgs: time.sleep(1) or ('{}', {}))
+    monkeypatch.setattr(bot, "complete", lambda p, m, msgs, **kw: time.sleep(1) or ('{}', {}))
     with pytest.raises(TimeoutError):
         bot.call_model("groq", "primary", [])
 

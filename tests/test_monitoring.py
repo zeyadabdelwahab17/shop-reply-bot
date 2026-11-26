@@ -36,7 +36,7 @@ def reply_with_usage():
 
 
 def test_chat_sends_one_trace_with_metadata_and_tokens(monkeypatch, isolated):
-    monkeypatch.setattr(bot, "call_model", lambda p, m, msgs: reply_with_usage())
+    monkeypatch.setattr(bot, "call_model", lambda p, m, msgs, **kw: reply_with_usage())
     assert client.post("/chat", json={"message": "الهودي بكام؟ رقمي 01012345678"}).status_code == 200
     assert len(isolated) == 1
     record = isolated[0]
@@ -124,21 +124,39 @@ def test_langfuse_stats_follows_the_cursor(monkeypatch):
     assert stats["requests"] == 2 and stats["limit_hits"] == 1 and stats["since"] == "2026-11-26T08:00:00Z"
 
 
+class FakeSender:
+    def __init__(self, fail=False):
+        self.calls, self.fail = [], fail
+
+    def post(self, url, **kwargs):
+        self.calls.append((url, kwargs))
+        if self.fail:
+            raise monitoring.httpx.ConnectError("down")
+        return monitoring.httpx.Response(200, request=monitoring.httpx.Request("POST", url))
+
+
 def test_send_trace_does_nothing_without_keys(monkeypatch):
-    called = []
-    monkeypatch.setattr(monitoring.httpx, "post", lambda *a, **k: called.append(1))
+    sender = FakeSender()
+    monkeypatch.setattr(monitoring, "_sender", lambda: sender)
     REAL_SEND_TRACE({"model_used": "x"})
-    assert not called
+    assert not sender.calls
+
+
+def test_send_trace_posts_otlp_with_v4_header(monkeypatch):
+    monkeypatch.setenv("LANGFUSE_PUBLIC_KEY", "pk-test")
+    monkeypatch.setenv("LANGFUSE_SECRET_KEY", "sk-test")
+    sender = FakeSender()
+    monkeypatch.setattr(monitoring, "_sender", lambda: sender)
+    REAL_SEND_TRACE({"model_used": "x", "latency_ms": 5})
+    url, kw = sender.calls[0]
+    assert url.endswith("/api/public/otel/v1/traces")
+    assert kw["headers"]["x-langfuse-ingestion-version"] == "4" and "resourceSpans" in kw["json"]
 
 
 def test_send_trace_never_raises(monkeypatch):
     monkeypatch.setenv("LANGFUSE_PUBLIC_KEY", "pk-test")
     monkeypatch.setenv("LANGFUSE_SECRET_KEY", "sk-test")
-
-    def boom(*a, **k):
-        raise monitoring.httpx.ConnectError("down")
-
-    monkeypatch.setattr(monitoring.httpx, "post", boom)
+    monkeypatch.setattr(monitoring, "_sender", lambda: FakeSender(fail=True))
     REAL_SEND_TRACE({"model_used": "x", "latency_ms": 5})   # logged, not raised
 
 
@@ -151,10 +169,10 @@ def test_summarize_counts_limit_hits_separately():
 
 
 def test_stats_from_memory_without_langfuse(monkeypatch):
-    monkeypatch.setattr(bot, "call_model", lambda p, m, msgs: OK)
+    monkeypatch.setattr(bot, "call_model", lambda p, m, msgs, **kw: OK)
     client.post("/chat", json={"message": "الهودي بكام؟"})
     live = client.get("/stats.json").json()["live"]
-    assert live["source"] == "memory" and live["requests"] == 1 and "restart" in live["note"]
+    assert live["source"] == "memory" and live["requests"] == 1 and "instance" in live["note"]
 
 
 def test_stats_page_is_served():
@@ -181,7 +199,7 @@ def test_latest_evals_mean_and_min(tmp_path):
 def test_faked_x_forwarded_for_does_not_dodge_the_visitor_limit(monkeypatch):
     # The client fakes the left entries; the proxy appends the real address (the last entry).
     monkeypatch.setattr(main, "DEMO_MAX_PER_VISITOR", 1)
-    monkeypatch.setattr(bot, "call_model", lambda p, m, msgs: OK)
+    monkeypatch.setattr(bot, "call_model", lambda p, m, msgs, **kw: OK)
     first = {"X-Forwarded-For": "203.0.113.7"}
     faked = {"X-Forwarded-For": "1.2.3.4, 203.0.113.7"}
     other = {"X-Forwarded-For": "1.2.3.4, 198.51.100.9"}
@@ -201,7 +219,17 @@ def test_trusted_proxy_hops(monkeypatch):
     assert main.visitor_id(Req("1.2.3.4, 203.0.113.7")) == "203.0.113.7"
 
 
-def test_debug_ip_is_off_by_default():
+def test_on_vercel_the_ip_comes_from_x_real_ip(monkeypatch):
+    # Vercel overwrites X-Forwarded-For / X-Real-IP with the real client IP (no spoofing).
+    monkeypatch.setattr(main, "ON_VERCEL", True)
+
+    class Req:
+        headers = {"x-real-ip": "203.0.113.7", "x-forwarded-for": "203.0.113.7"}
+        client = None
+    assert main.visitor_id(Req()) == "203.0.113.7"
+
+
+def test_debug_ip_endpoint_is_gone():
     assert client.get("/debug/ip").status_code == 404
 
 
@@ -209,7 +237,7 @@ def test_empty_langfuse_keys_mean_monitoring_off(monkeypatch):
     monkeypatch.setenv("LANGFUSE_PUBLIC_KEY", "")
     monkeypatch.setenv("LANGFUSE_SECRET_KEY", "  ")
     assert not monitoring.enabled()
-    called = []
-    monkeypatch.setattr(monitoring.httpx, "post", lambda *a, **k: called.append(1))
+    sender = FakeSender()
+    monkeypatch.setattr(monitoring, "_sender", lambda: sender)
     REAL_SEND_TRACE({"model_used": "x"})
-    assert not called and monitoring.live_stats()["source"] == "memory"
+    assert not sender.calls and monitoring.live_stats()["source"] == "memory"

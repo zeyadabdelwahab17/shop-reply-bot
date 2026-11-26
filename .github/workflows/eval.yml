@@ -21,8 +21,9 @@ on:
         default: "groq:qwen/qwen3.8-27b"
 
 env:
-  # full: 5 points under the lowest of today's main-set runs (set after the 26 Nov 2026 runs).
-  MIN_ACCURACY_FULL: "95"
+  # full: 5 points under the lowest of the 3 main-set runs on 26 Nov 2026 (qwen, v2: 96.8 / 96.8 / 96.8).
+  # 31 questions: 29/31 = 93.5% passes, 28/31 = 90.3% fails (2 misses allowed).
+  MIN_ACCURACY_FULL: "91.8"
   # smoke: 10 questions, so one miss = 90%. Allows one miss.
   MIN_ACCURACY_SMOKE: "90"
 

@@ -1,3 +1,5 @@
+# UNUSED. Render's free plan asks for a credit card, so the app runs on Vercel (vercel.json) instead.
+# Kept only as a record of the Render setup that was tried on 26 Nov 2026.
 # Render Blueprint: one free web service. Secrets are NOT here: "sync: false" makes Render ask for them
 # in the dashboard when the Blueprint is created. Never put a key in this file.
 services:

@@ -287,7 +287,34 @@ Questions that changed: v2 q04 (wrong → correct), v3 q19 (wrong → correct), 
   الجينز خلص حالياً"). This is the same Day 2 issue, still in v2: a real bot error.
 - Run 2: **30/31 (96.8%)**. q17 (defect, who pays shipping) answered correctly but **handed off for no reason**:
   a false handoff, a real bot error.
-- Run 3 and the holdout were still running (waiting on the daily token quota) when this was written.
+- Run 3: **30/31 (96.8%)**. q17 again: correct answer plus an unneeded handoff. Same failure in 2 of 3 runs,
+  so it's a pattern, not noise. It's the next prompt fix (in the main set; the holdout is not used for tuning).
+- **Mean 96.8%, min 96.8%** over the 3 runs (all three runs finished, despite the token quota).
+  MLflow: `447ed4f7b02944aa9b4dc75a6509238d`, `29e1279f008c477da40d9668eefae832`, `385db8aa31b44f7db9a9fd7ee5565898`.
+- CI threshold for the full eval: **91.8%** (= 96.8 − 5). With 31 questions, 2 misses pass and 3 fail.
+  Smoke (10 questions): 90%, one miss allowed.
+
+### Holdout result (qwen, prompt v2, 15 questions, run once)
+- **93.3% (14/15)**, 0 false handoffs, 0 missed handoffs, 0 invalid JSON, latency avg 1231 / p95 3315 ms.
+  MLflow (final grading): `9ebd461c974e4bb59fdcf99d558cdac9`.
+- What happened on the way, checked question by question:
+  - First pass: 92.9% (13/14 graded), because **h04 was "invalid"**: a network "Connection error." The runner
+    treated connection errors as permanent and didn't retry; it now retries them like 503s. Only h04 was asked
+    again (the other 14 answers were kept as they were).
+  - **h14 was a grader error:** "أنا **مش عندي** وصول لقاعدة بيانات الأوردرات أو أسماء العملاء…" is a correct
+    refusal, but "مش عندي" wasn't in the accepted list. Added; re-graded from the saved reply.
+    Before that fix the completed run showed 86.7% (13/15).
+- **The one real failure, h04** "صورلي الجواكت المتاحة":
+  "عندنا جاكت جينز بس، بس للأسف نزل من المخزن دلوقتي. لو عايز حاجة تانية، ممكن تشوف الهودي التقيل بـ 1250 جنيه أو
+  الهودي بسوستة بـ 1400 جنيه."
+  It ignores the photo request (never says it can't send photos), and "نزل من المخزن" is ambiguous ("came
+  out of the warehouse" vs "sold out"). That phrase was **not** added to the grader: ambiguous stock wording
+  should not pass.
+- Wording notes on replies that passed (the grader checks facts, not wording):
+  - h01: opens with "مفيش بيزك في الكاتالوج" (didn't recognise the slang) before giving the right tee and price.
+  - h14: adds a detail that isn't in the shop file ("ده متاح بس للفرق اللي عندها صلاحيات على النظام").
+- **No prompt change was made because of the holdout.** A future prompt fix for photo requests must be logged
+  here, and the holdout score after it should be read as partly tuned.
 
 ### Planned improvement (not built): send less of the shop file
 - Today every message sends the whole system prompt: **~2,411 prompt tokens**, 7,921 characters.
@@ -300,3 +327,34 @@ Questions that changed: v2 q04 (wrong → correct), v3 q19 (wrong → correct), 
   200k-token budget.
 - Risks: wrong section picked → "not in the file" → false handoff; two-in-one questions need several sections.
   This must be measured with the main set and the holdout before switching.
+
+### Hosting switch: Render → Vercel (serverless)
+- Render's free web service asked for a credit card (both Blueprint and manual), so the app moves to
+  **Vercel Hobby** (free, no card). `render.yaml` stays in the repo, marked unused.
+- What changed for serverless (facts from Vercel's docs, read 26 Nov 2026):
+  - **Entry point:** Vercel auto-detects `app/main.py` with a top-level `app`, so no code move was needed.
+    `vercel.json`: region `fra1` (Frankfurt, close to Egypt, Langfuse EU and Upstash EU), `maxDuration` 60 s,
+    and dev folders excluded from the bundle. `.python-version` = `3.14`: Vercel supports 3.12 (default), 3.13 and
+    3.14, so this matches the local 3.14.5 at the minor level (Vercel picks the patch).
+  - **Time limit:** Hobby's default and maximum are both 300 s. The worst case before the change was ~75 s
+    (3 models × (12 s + retry)): inside the limit, but far too long for a customer. Added
+    `REQUEST_BUDGET_SECONDS = 25`: no new model attempt starts with less than 3 s left, each call's timeout is
+    capped by the time left, and when the budget runs out → handoff message. A test checks that
+    budget + Langfuse send + store calls stay under `maxDuration`.
+  - **Read-only disk:** only `/tmp` is writable, so `logs/requests.jsonl` → `/tmp` on Vercel, and a failed log
+    write no longer breaks `/chat` (it would have been a 500 on every request).
+  - **No shared memory:** demo limits, the circuit breaker and the "daily quota used" flags now live in
+    **Upstash Redis** (free plan: 500K commands/month, 250 MB, 1 database), plain REST through `httpx`.
+    - Visitors are stored as salted hashes of their IP (the salt is the store's secret token), never as raw IPs.
+      Keys expire after 2 days.
+    - The visitor is counted first, so someone over their own limit doesn't use up the global cap for everyone.
+    - **Store down → fail safe:** the request is allowed, but counted in memory with a much lower global cap
+      per instance (`DEMO_FALLBACK_CAP`, 20). Model health falls back to per-instance state.
+    - Cost per chat: ~3 small Redis calls (limits + health), plus one more only after a model failure.
+  - **Langfuse:** Vercel documents no after-response hook (`waitUntil`) for Python, so a background task could be
+    cut off. The trace is now sent **before** the reply returns, over a kept-alive connection with a 2 s timeout.
+    Measured from the dev PC: ~750 ms on a new connection, **~120 ms** warm.
+  - **Visitor IP:** Vercel *overwrites* `X-Forwarded-For` / `X-Real-IP` with the real client IP "to prevent IP
+    spoofing", so on Vercel the app uses `X-Real-IP`. The Render-only `/debug/ip` check was removed.
+  - **Keep-alive cron removed:** it targeted Render's sleeping service. Vercel cold starts will be measured after
+    the first deploy, and a ping comes back only if they turn out slow.

@@ -28,6 +28,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+import openai  # noqa: E402
+
 from app import bot  # noqa: E402
 from evals.grading import grade  # noqa: E402
 
@@ -131,8 +133,8 @@ def call_pinned(provider, model, messages, pacer):
                 response = getattr(exc, "response", None)
                 retry_after = parse_seconds(response.headers.get("retry-after")) if response is not None else None
                 pause = (retry_after or 20) + 1
-            elif kind in ("503", "timeout"):
-                pause = 3
+            elif kind in ("503", "timeout") or isinstance(exc, openai.APIConnectionError):
+                pause = 3   # transient: overloaded, slow, or a network blip ("Connection error.")
             else:
                 break   # bad request, no key, ...: retrying will not help
             print(f"    ({kind}, try {attempt}/{MAX_TRIES}, waiting {pause:.0f}s)")
