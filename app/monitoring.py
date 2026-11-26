@@ -31,7 +31,7 @@ SERVICE = "shop-reply-bot"
 APP_ENV = os.getenv("APP_ENV", "local")        # "production" on Render; the stats page counts only these
 STATS_CACHE_SECONDS = 60
 PAGE_LIMIT = 1000                              # Langfuse max per page
-MAX_PAGES = 5                                  # 5000 requests; the demo cap is 150 requests/day
+MAX_PAGES = 5                                  # 5000 requests; the demo cap is 100 requests/day
 STARTED_AT = datetime.now(timezone.utc)
 INGESTION_HEADERS = {"x-langfuse-ingestion-version": "4"}
 # Sent before the reply returns (serverless can cut off after-response work), so keep it short.

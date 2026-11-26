@@ -30,7 +30,7 @@ Small and focused: one problem, solved well, easy to see. No extra features.
 - Day 3: evals + MLflow to compare prompt versions / models + CI (GitHub Actions) — **DONE (26 Nov 2026)**
   Mocked pytest runs on every push; the real 30-question eval runs only on manual trigger
   (`workflow_dispatch`), because of the free-tier quota.
-- Day 4: held-out eval + deploy to Vercel + Langfuse monitoring + stats page + demo limits.
+- Day 4: held-out eval + deploy to Vercel + Langfuse monitoring + stats page + demo limits — **DONE (26 Nov 2026)**
 - Day 5: handoff tickets:
   - ask for the customer's phone, validated in code (11 digits, starts with 010/011/012/015)
   - scripted no-LLM fallback reply when all models are down
@@ -118,3 +118,27 @@ Small and focused: one problem, solved well, easy to see. No extra features.
 - Grader audit done (phrases + negation-aware must_not_contain). Final MLflow runs: v2 `6be3122a3d46492285caee47c1e471bb`,
   v3 `62294a22c6a54b77974d73c8d11aefa7`.
 - Tests: 59 passing.
+
+## State after Day 4
+- Live: https://shop-reply-bot.vercel.app (Vercel Hobby, region fra1, Python 3.14, `vercel.json` maxDuration 60).
+  Cold start ~2.6 s, warm ~0.4 s → no keep-alive. Env vars are set in the Vercel dashboard by the user.
+- `evals/holdout.json`: 15 user-written questions (h01–h15), never used for tuning; any prompt change made
+  because of a holdout failure must be written in `docs/BUILD_LOG.md`. `run_eval.py --set main|holdout|smoke`
+  (smoke = 10 main questions), `--wait-for-quota`, retries connection errors.
+- Results (qwen, v2): main 96.8% ×3 runs, holdout 93.3% (h04 ignores the photo request). Recurring miss: q17
+  false handoff. CI `eval.yml`: manual, `set` smoke/full, thresholds full 91.8, smoke 90.
+- Groq qwen free tier also has **200k tokens/day per organization** (~80 chats); a full eval uses ~40% of it.
+- `app/store.py`: Upstash Redis REST (`UPSTASH_REDIS_REST_URL/TOKEN`), 1.5 s timeout, `StoreDown`. Shared: demo
+  limits (`srb:demo:<UTC day>:v:<salted ip hash>`, `:total`), quota flags, breaker, failure counts. Store down →
+  allow, local counting with `DEMO_FALLBACK_CAP` (20). `DEMO_DAILY_CAP` = 100.
+- `bot.answer()`: `REQUEST_BUDGET_SECONDS = 25` per request; logs to `/tmp` on Vercel; usage tokens recorded.
+- Visitor IP on Vercel: `X-Real-IP` (Vercel overwrites it). Elsewhere: XFF entry `TRUSTED_PROXY_HOPS` from the right.
+- `app/monitoring.py`: Langfuse via OTLP/HTTP JSON (`/api/public/otel/v1/traces`, ingestion v4), sent
+  synchronously before the reply (2 s timeout; no waitUntil in Python). Reads root "chat" observations via
+  `/api/public/v2/observations` for `/stats` (60 s cache). `APP_ENV=production` on Vercel. Empty keys → off.
+  TLS uses the OS trust store (Avast HTTPS scanning on the dev PC).
+- `/stats` + `/stats.json`: latest 3 main runs (mean/min), latest holdout, live counters from Langfuse.
+- Open: `gemini-3.5-flash` took 21.5 s with the full prompt on 26 Nov (over the 12 s limit) → when Groq hits
+  its per-minute limit, the request can burn the 25 s budget before reaching `flash-lite`. Chain reorder pending
+  the user's decision. Langfuse cuts metadata strings at ~200 chars.
+- Tests: 88 passing.

@@ -358,3 +358,38 @@ Questions that changed: v2 q04 (wrong → correct), v3 q19 (wrong → correct), 
     spoofing", so on Vercel the app uses `X-Real-IP`. The Render-only `/debug/ip` check was removed.
   - **Keep-alive cron removed:** it targeted Render's sleeping service. Vercel cold starts will be measured after
     the first deploy, and a ping comes back only if they turn out slow.
+
+### Live on Vercel: post-deploy checks (26 Nov 2026, ~23:20 Cairo)
+- URL: https://shop-reply-bot.vercel.app. Region `fra1` was accepted on Hobby (`x-vercel-id: fra1::fra1::…`),
+  Python 3.14 and the `excludeFiles` bundle built without changes.
+- **Cold start: ~2.6 s** for the first `/health` after the deploy, then ~0.4 s (measured from Cairo). Fast enough
+  for a demo, so **no keep-alive ping**.
+- **Smoke test (3 questions, live `/chat`):**
+  1. "الهودي التقيل بكام؟" → "الهودي التقيل بـ 1250 جنيه." (qwen, 1.0 s end to end). Correct.
+  2. "عايز أطلب 50 تيشيرت جملة" → handoff message, reason "wholesale" (qwen, 0.6 s). Correct.
+  3. "عندكو جزم؟" → **handoff after 25 s, "all models failed". A real problem**, read from the Langfuse trace:
+     - Groq qwen: **429 per-minute** (3 questions in ~2 s × ~2.5k tokens > 8k tokens/min). Expected on the free tier.
+     - `gemini-3.5-flash`: timeout at 12 s, retried, timeout again → the 25 s budget was used up and
+       `gemini-3.1-flash-lite` was never tried.
+     - Checked from the dev PC right after: `gemini-3.5-flash` answers correctly but takes **21.5 s** with the
+       full prompt (a tiny prompt takes ~1 s), so it can't fit the 12 s call limit right now.
+       `gemini-3.1-flash-lite` answered the same question correctly in 1.5–2.4 s ("مش بنبيع جزم" + cargo 950 /
+       sweatpants 800), after one timeout of its own a minute earlier.
+     - **Not fixed yet (needs a decision, the chain order is part of the fixed stack):** options are to put
+       `flash-lite` before `3.5-flash` in `LLM_CHAIN` (env only), and/or not retry a timeout when the retry would
+       eat the budget for the next model.
+- **Langfuse:** all 3 production requests arrived as traces (`environment=production`) with model, latency,
+  handoff, reason and attempts; no message text. Langfuse cuts long metadata strings (~200 chars), so the 3rd
+  attempt of a 3-attempt trace is lost from `attempts` (the summary fields are complete).
+- **`/stats`** works live: eval tiles (main 96.8% mean/min, holdout 93.3%) and live tiles read from Langfuse
+  (3 requests, 0% fallback, 66.7% handoff, avg latency 8.7 s, inflated by the 25 s failure).
+- **Upstash:** the keys exist only in Vercel, so the counters are checked in the Upstash console (Data Browser):
+  `srb:demo:<UTC date>:total` should equal the number of chats today. The "day" is the UTC date, so the demo
+  counters reset at 02:00 Cairo time.
+
+### Day 4 summary
+- Held-out set (15 user-written questions): **93.3%**. Main set: **96.8%** in all 3 runs. CI full threshold 91.8%,
+  smoke 90%.
+- Live on Vercel Hobby (no card) with Upstash Redis for shared limits/health, Langfuse traces, `/stats` page.
+- Open issues for later: q17 false handoff (2 of 3 runs), h04 ignores photo requests, Gemini 3.5 Flash too slow
+  for the 12 s limit, Groq's 200k tokens/day (~80 chats) is the real daily capacity.
